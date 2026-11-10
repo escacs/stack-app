@@ -1,28 +1,27 @@
-// Top chrome: crumbs-style nav plus the worker/project switchers.
+// Top chrome: two views on the left; on the right the busy text, the user
+// and project (each a button that sends you back to its onboarding screen),
+// and the node face only when node is broken.
 import { For, Show } from 'solid-js';
-import { busy, config, node, workerName, workers, project, chooseWorker } from '../store';
+import { busy, chooseProject, config, node, project, switchWorker, workerName } from '../store';
 import { href } from '../router';
+import { shortPath } from '../onboard';
+
+const NAV = ['browse', 'installed'] as const;
 
 export default function TopBar(props: { scenario: string; segs: string[] }) {
   const view = () => props.segs[0] ?? '';
   const cur = (seg: string) => (seg === 'browse' ? view() === '' || view() === 'browse' : view() === seg);
-  const nav = () => [
-    ['browse', 'browse'],
-    ['installed', 'installed'],
-    ['worker', 'worker'],
-    ['project', 'project'],
-  ];
   return (
     <header id="topbar">
       <nav aria-label="views">
-        <For each={nav()}>
-          {([seg, label], i) => (
+        <For each={NAV}>
+          {(seg, i) => (
             <>
               <Show when={i() > 0}>
                 <span class="sep">/</span>
               </Show>
               <a href={href(props.scenario, seg)} class={cur(seg) ? 'cur' : ''}>
-                {label}
+                {seg}
               </a>
             </>
           )}
@@ -32,41 +31,28 @@ export default function TopBar(props: { scenario: string; segs: string[] }) {
         <Show when={busy()}>
           <span class="dimtxt">{busy()}…</span>
         </Show>
-        <label title="worker profile">
-          <span class="dimtxt">who</span>{' '}
-          <select
-            value={workerName() ?? ''}
-            onChange={(e) => void chooseWorker(e.currentTarget.value || null)}
-            aria-label="worker profile"
-          >
-            {/* selected per option: the value prop alone does not re-apply
-                once the async worker list populates the options. */}
-            <option value="" selected={workerName() == null}>none</option>
-            <For each={workers()}>
-              {(w) => <option value={w.name} selected={workerName() === w.name}>{w.name}</option>}
-            </For>
-          </select>
-        </label>
-        <Show when={project()}>
-          <span class="dimtxt" title={project() ?? ''}>
-            {shortPath(project() ?? '')}
-          </span>
+        <Show when={config()}>
+          <button class="linklike" title="switch user" onClick={() => void switchWorker()}>
+            {workerName() ?? 'who'}
+          </button>
         </Show>
-        <span
-          class={`node ${node()?.ok === false ? 'bad' : ''}`}
-          title={node()?.ok === false ? (node()?.error ?? 'node missing') : (node()?.version ?? 'node?')}
-        >
-          {node()?.ok === false ? '(x_x)' : '(^_^)'}
-        </span>
-        <Show when={!config()}>
-          <span class="dimtxt">loading…</span>
+        <Show when={project()}>
+          {(p) => (
+            <button
+              class="linklike"
+              title={p()}
+              onClick={() => void chooseProject(null)}
+            >
+              {shortPath(p())}
+            </button>
+          )}
+        </Show>
+        <Show when={node()?.ok === false}>
+          <span class="node bad" title={node()?.error ?? 'node missing'}>
+            (x_x)
+          </span>
         </Show>
       </div>
     </header>
   );
-}
-
-function shortPath(p: string): string {
-  const parts = p.replace(/\/+$/, '').split('/');
-  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p;
 }

@@ -1,11 +1,9 @@
-import { Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js';
-import { appUpdate, appVersion, boot, bootError, config, lock, node, stack, workerSkipped } from './store';
+import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
+import { actionError, appUpdate, appVersion, boot, bootError, config, lock, stack, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash } from './router';
 import TitleBar from './views/TitleBar';
 import TopBar from './views/TopBar';
-import Worker from './views/Worker';
-import Project from './views/Project';
 import Browse from './views/Browse';
 import Status from './views/Status';
 import StackSetup from './views/StackSetup';
@@ -15,12 +13,11 @@ import { ProjectScreen, WhoScreen } from './views/Onboard';
 export default function App() {
   const [hash, setHash] = createSignal(parseHash(location.hash));
   const onHash = () => setHash(parseHash(location.hash));
-  addEventListener('hashchange', onHash);
-  onCleanup(() => removeEventListener('hashchange', onHash));
-
-  createEffect(() => {
+  onMount(() => {
+    addEventListener('hashchange', onHash);
     void boot();
   });
+  onCleanup(() => removeEventListener('hashchange', onHash));
 
   const segs = () => hash().segs;
   const view = () => segs()[0] ?? '';
@@ -31,6 +28,7 @@ export default function App() {
     const c = config();
     return c ? onboardStep(c.worker, c.project, workerSkipped()) : null;
   };
+  const updates = () => countUpdates(lock().rows);
 
   return (
     <div id="shell">
@@ -41,6 +39,9 @@ export default function App() {
       <main id="app">
         <Show when={bootError()}>
           <p class="conflict" role="alert">{bootError()}</p>
+        </Show>
+        <Show when={actionError()}>
+          <p class="conflict" role="alert">{actionError()}</p>
         </Show>
         <Show when={!config() && !bootError()}>
           <p class="empty">(._.) starting…</p>
@@ -59,12 +60,6 @@ export default function App() {
             <Match when={view() === '' || view() === 'browse'}>
               <Browse scenario={hash().scenario} segs={view() === '' ? ['browse'] : segs()} />
             </Match>
-            <Match when={view() === 'worker'}>
-              <Worker scenario={hash().scenario} />
-            </Match>
-            <Match when={view() === 'project'}>
-              <Project />
-            </Match>
             <Match when={view() === 'installed'}>
               <Status scenario={hash().scenario} />
             </Match>
@@ -77,28 +72,23 @@ export default function App() {
       <Show when={!step()}>
         <footer class="appfoot">
           <span class="dimtxt">
-            <Show when={appVersion()} fallback="?">
-              {(v) => <span>{v()}</span>}
-            </Show>
+            <Show when={appVersion()}>{(v) => <span>{v()}</span>}</Show>
             <Show when={appUpdate()}>
               {(v) => (
                 <span>
-                  {' → '}
-                  <a href={href(hash().scenario, 'project')}>{v()} available</a>
+                  {' · '}
+                  <a href={href(hash().scenario, 'installed')}>→ {v()} available</a>
                 </span>
               )}
             </Show>
-            {' · '}
-            <Show
-              when={countUpdates(lock().rows) > 0}
-              fallback={<span>up to date</span>}
-            >
-              <a href={href(hash().scenario, 'installed')}>
-                {countUpdates(lock().rows)} update{countUpdates(lock().rows) === 1 ? '' : 's'}
-              </a>
+            <Show when={updates() > 0}>
+              <span>
+                {' · '}
+                <a href={href(hash().scenario, 'installed')}>
+                  {updates()} update{updates() === 1 ? '' : 's'}
+                </a>
+              </span>
             </Show>
-            {' · '}
-            <span>{node()?.version ?? 'node?'}</span>
           </span>
         </footer>
       </Show>

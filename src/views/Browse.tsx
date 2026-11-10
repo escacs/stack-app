@@ -5,12 +5,24 @@
 // Desktop additions, kept visually quiet: the import section, git-state
 // markers on rows, the /all route (the site links * all at #/search/), and
 // click-only meta/preview links (the keyboard walks the tree files).
-// Route shape inside #browse: [] home, [kind] kind view, [all] everything,
-// [id...] entry detail, [id..., file...] entry file.
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import { errText, stackRun } from '../bridge';
+// Pure logic (routes, crumbs, catalog index, fetch cache) is in ../browseData.
+import type { JSX } from 'solid-js';
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
+import { errText, stackRun, type AppConfig } from '../bridge';
 import { href } from '../router';
-import { KINDS, fmtBytes, kindOf, pluralOf } from '../parse';
+import { fmtBytes, kindOf, pluralOf } from '../parse';
 import { moveSel } from '../onboard';
 import {
   describeImport,
@@ -31,6 +43,22 @@ import {
 import { config, lock, refreshLock } from '../store';
 import { CliErr, Empty, Markers, OpResult } from '../ui';
 import {
+  catalogs,
+  buildIndex,
+  byKindOrder,
+  crumbParts,
+  previewCache,
+  previewKey,
+  resolveRoute,
+  sameRoute,
+  sourceKey,
+  whenVisible,
+  type CatalogData,
+  type CatalogIndex,
+  type CrumbTarget,
+  type Route,
+} from '../browseData';
+import {
   Bar,
   Face,
   FileTree,
@@ -38,7 +66,6 @@ import {
   Legend,
   Markdown,
   Sprite,
-  citedBy,
   fileRowOrder,
   groupComponents,
   kindAgg,
@@ -48,153 +75,171 @@ import {
   type LibraryGroup,
 } from '../site';
 
-type Route =
-  | { kind: 'home' }
-  | { kind: 'all' }
-  | { kind: 'kind'; kindSingular: string }
-  | { kind: 'entry'; id: string; file: string | null }
-  | { kind: 'missing' };
-
-/** Resolve browse sub-segments: longest entry-id prefix wins (web parse). */
-export function resolveRoute(segs: string[], entries: JsonEntry[]): Route {
-  const rest = segs.slice(1);
-  if (!rest.length) return { kind: 'home' };
-  for (let n = rest.length; n >= 1; n--) {
-    const id = rest.slice(0, n).join('/');
-    if (entries.some((e) => e.id === id)) {
-      const tail = rest.slice(n).join('/');
-      return { kind: 'entry', id, file: tail || null };
-    }
-  }
-  if (rest.length === 1) {
-    if (rest[0] === 'all') return { kind: 'all' };
-    const k = KINDS.find((x) => x === rest[0] || pluralOf(x) === rest[0]);
-    if (k) return { kind: 'kind', kindSingular: k };
-  }
-  return { kind: 'missing' };
-}
+type Agg = ReturnType<typeof kindAgg>;
+type Doc = ReturnType<typeof toShowDoc>;
+type FileBody = ReturnType<typeof toShowFile>;
 
 export default function Browse(props: { scenario: string; segs: string[] }) {
   const [entries, setEntries] = createSignal<JsonEntry[]>([]);
   const [uncommitted, setUncommitted] = createSignal<Set<string>>(new Set());
   const [note, setNote] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(true);
+  const [loaded, setLoaded] = createSignal(false);
   const [q, setQ] = createSignal('');
   const [sel, setSel] = createSignal(-1);
   const [entryFiles, setEntryFiles] = createSignal<ShowFile[]>([]);
   let inputEl: HTMLInputElement | undefined;
+  let listGen = 0;
 
-  const route = (): Route => resolveRoute(props.segs, entries());
-  const searching = () => q().trim().length > 0;
-
-  async function load() {
-    const c = config();
-    setLoading(true);
-    setNote(null);
-    try {
-      const out = await stackRun('list', ['--json'], c?.project ?? '.', c?.stackPath);
-      const data = fromStackOut<ListJson>(out);
-      setEntries(data.entries);
-      setUncommitted(new Set<string>(data.uncommitted ?? []));
-      if (!data.entries.length) setNote('no entries');
-    } catch (err) {
-      setEntries([]);
-      setUncommitted(new Set<string>());
-      setNote(errText(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  onMount(() => {
-    void load();
-    // Dotted leaders, exactly like the web.
-    document.documentElement.style.setProperty('--dots', JSON.stringify('. '.repeat(120)));
-    if (matchMedia('(hover: hover)').matches) inputEl?.focus();
+  // Changes only when the project or stack checkout does, never on config edits.
+  const source = createMemo(() => sourceKey(config()));
+  // Identity holds while the route is the same, so route-keyed views survive list refreshes.
+  const route = createMemo<Route>(() => resolveRoute(props.segs, entries()), { kind: 'home' }, { equals: sameRoute });
+  const searching = createMemo(() => q().trim().length > 0);
+  const index = createMemo<CatalogIndex>(() => buildIndex(entries()));
+  const agg = createMemo<Agg>(() => kindAgg(entries()));
+  const allSorted = createMemo(() => [...entries()].sort(byKindOrder));
+  const found = createMemo(() => scoreEntries(entries(), q()));
+  const kindList = createMemo(() => {
+    const r = route();
+    return r.kind === 'kind' ? entries().filter((e) => e.kind === r.kindSingular) : [];
   });
+  const grouped = createMemo(() => {
+    const r = route();
+    return r.kind === 'kind' && r.kindSingular === 'component' ? groupComponents(kindList()) : null;
+  });
+  // The flat list shown for search, `all` and non-component kinds. One list
+  // view serves all three, so rows that stay in view survive a switch.
+  const listed = createMemo<JsonEntry[] | null>(() => {
+    if (searching()) return found();
+    const r = route();
+    if (r.kind === 'all') return allSorted();
+    if (r.kind === 'kind' && !grouped()) return kindList();
+    return null;
+  });
+  const byId = (): boolean => searching() || route().kind === 'all';
+  const entryId = (): string => {
+    const r = route();
+    return r.kind === 'entry' ? r.id : '';
+  };
+  const entryFile = (): string | null => {
+    const r = route();
+    return r.kind === 'entry' ? r.file : null;
+  };
 
   const entryHref = (id: string): string => href(props.scenario, 'browse', ...id.split('/'));
   const kindHref = (kind: string): string =>
     kind ? href(props.scenario, 'browse', pluralOf(kind)) : href(props.scenario, 'browse');
+  const allHref = (): string => href(props.scenario, 'browse', 'all');
   const fileHref = (id: string, file: string): string =>
     href(props.scenario, 'browse', ...id.split('/'), ...file.split('/'));
+  const targetHref = (t: CrumbTarget | null): string | null => {
+    if (!t) return null;
+    if (t.to === 'home') return kindHref('');
+    if (t.to === 'kind') return kindHref(t.kindSingular);
+    return entryHref(t.id);
+  };
 
   // Navigable rows for the keyboard cursor, like the web's [data-nav].
-  const rows = (): { href: string }[] => {
+  const navRows = createMemo<{ href: string }[]>(() => {
+    if (searching()) return found().map((e) => ({ href: entryHref(e.id) }));
     const r = route();
-    if (searching()) return scoreEntries(entries(), q()).map((e) => ({ href: entryHref(e.id) }));
     if (r.kind === 'home') {
-      const kinds = kindAgg(entries()).stats.map((s) => ({ href: kindHref(s.kind) }));
-      return [...kinds, { href: href(props.scenario, 'browse', 'all') }];
+      return [...agg().stats.map((s) => ({ href: kindHref(s.kind) })), { href: allHref() }];
     }
+    if (r.kind === 'all') return allSorted().map((e) => ({ href: entryHref(e.id) }));
     if (r.kind === 'kind') {
-      const list = entries().filter((e) => e.kind === r.kindSingular);
-      // Components render grouped by library; the keyboard walks the same
-      // order (group members first, then ungrouped rows), skipping headers.
-      const ordered =
-        r.kindSingular === 'component'
-          ? ((g) => [...g.groups.flatMap((x) => x.members), ...g.ungrouped])(groupComponents(list))
-          : list;
+      // Components render grouped by library; the keyboard walks the same order.
+      const g = grouped();
+      const ordered = g ? [...g.groups.flatMap((x) => x.members), ...g.ungrouped] : kindList();
       return ordered.map((e) => ({ href: entryHref(e.id) }));
     }
-    if (r.kind === 'all') {
-      return [...entries()]
-        .sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind))
-        .map((e) => ({ href: entryHref(e.id) }));
-    }
-    if (r.kind === 'entry') {
-      return fileRowOrder(entryFiles()).map((p) => ({ href: fileHref(r.id, p) }));
-    }
+    if (r.kind === 'entry') return fileRowOrder(entryFiles()).map((p) => ({ href: fileHref(r.id, p) }));
     return [];
-  };
+  });
+
+  const crumbs = createMemo(() =>
+    crumbParts(route(), searching()).map((p) => ({ label: p.label, href: targetHref(p.target) })),
+  );
 
   const up = (): void => {
     const r = route();
-    if (r.kind === 'entry' && r.file) location.hash = entryHref(r.id);
-    else if (r.kind === 'entry') location.hash = kindHref(kindOf(r.id));
-    else if (r.kind === 'kind' || r.kind === 'all') location.hash = kindHref('');
+    if (r.kind === 'entry') location.hash = r.file ? entryHref(r.id) : kindHref(kindOf(r.id));
+    else if (r.kind === 'kind' || r.kind === 'all' || r.kind === 'missing') location.hash = kindHref('');
   };
 
-  createEffect(() => {
-    // A new route clears the prompt and the cursor, like the web hashchange.
-    void props.segs.join('/');
-    void entries().length;
-    void entryFiles().length;
+  const clearQuery = (): void => {
     setQ('');
     if (inputEl) inputEl.value = '';
-    setSel(-1);
-    window.scrollTo(0, 0);
-  });
+  };
 
-  createEffect(() => {
-    void q();
-    setSel(-1);
-  });
-
-  createEffect(() => {
-    const i = sel();
-    if (i >= 0) {
-      document.querySelector(`[data-row="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+  /**
+   * Stale-while-revalidate: a cached catalog renders at once and refreshes in
+   * the background; `loading…` shows only when this source has no cache yet.
+   */
+  async function load(): Promise<void> {
+    const c = config();
+    const key = sourceKey(c);
+    const gen = ++listGen;
+    const cached = catalogs.get(key);
+    if (cached) {
+      setEntries(cached.entries);
+      setUncommitted(cached.uncommitted);
+      setLoaded(true);
+    } else {
+      setEntries([]);
+      setUncommitted(new Set<string>());
+      setLoaded(false);
+      setNote(null);
     }
-  });
+    try {
+      const out = await stackRun('list', ['--json'], c?.project ?? '.', c?.stackPath);
+      if (gen !== listGen) return;
+      if (cached && cached.raw === out.stdout) {
+        setNote(null);
+        return;
+      }
+      const data = fromStackOut<ListJson>(out);
+      const next: CatalogData = {
+        raw: out.stdout,
+        entries: data.entries,
+        uncommitted: new Set<string>(data.uncommitted ?? []),
+      };
+      catalogs.set(key, next);
+      setEntries(next.entries);
+      setUncommitted(next.uncommitted);
+      setNote(null);
+    } catch (err) {
+      if (gen !== listGen) return;
+      setNote(errText(err));
+    } finally {
+      if (gen === listGen) setLoaded(true);
+    }
+  }
 
   onMount(() => {
+    // Dotted leaders, exactly like the web.
+    document.documentElement.style.setProperty('--dots', JSON.stringify('. '.repeat(120)));
+    if (matchMedia('(hover: hover)').matches) inputEl?.focus();
+
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
-      if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
+      // The search box is ours; other fields (the --to input) keep their keys.
+      if (t && t !== inputEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
       if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return;
+      // Buttons and links keep Enter and Space for their own activation.
+      if (t && ['BUTTON', 'A'].includes(t.tagName) && (ev.key === 'Enter' || ev.key === ' ')) return;
       switch (ev.key) {
         case 'ArrowDown':
           ev.preventDefault();
-          setSel((s) => moveSel(s, 1, rows().length));
+          setSel((s) => moveSel(s, 1, navRows().length));
           return;
         case 'ArrowUp':
           ev.preventDefault();
-          setSel((s) => moveSel(s, -1, rows().length));
+          setSel((s) => moveSel(s, -1, navRows().length));
           return;
         case 'Enter': {
-          const list = rows();
-          const pick = sel() >= 0 ? list[sel()] : q().trim() ? list[0] : null;
+          const list = navRows();
+          const pick = sel() >= 0 ? list[sel()] : q().trim() ? list[0] : undefined;
           if (pick) {
             ev.preventDefault();
             location.hash = pick.href;
@@ -203,44 +248,51 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         }
         case 'Escape':
           ev.preventDefault();
-          if (q()) {
-            setQ('');
-            if (inputEl) inputEl.value = '';
-          } else up();
-          return;
-        case ' ':
-          if (!q()) {
-            ev.preventDefault();
-            window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
-          }
+          if (q()) clearQuery();
+          else up();
           return;
       }
-      if (ev.key.length === 1) inputEl?.focus();
+      if (ev.key === ' ' && !q()) {
+        ev.preventDefault();
+        window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+        return;
+      }
+      if (ev.key.length === 1 && t !== inputEl) inputEl?.focus();
     };
     window.addEventListener('keydown', onKey);
     onCleanup(() => window.removeEventListener('keydown', onKey));
   });
 
-  const crumbs = (): { label: string; href: string | null }[] => {
-    const r = route();
-    const home = { label: '~', href: searching() || r.kind !== 'home' ? kindHref('') : null };
-    if (searching() || r.kind === 'home') return [home];
-    if (r.kind === 'all') return [home, { label: '/all', href: null }];
-    if (r.kind === 'kind') return [home, { label: `/${pluralOf(r.kindSingular)}`, href: null }];
-    if (r.kind === 'entry') {
-      const e = entries().find((x) => x.id === r.id);
-      const segs = r.id.split('/');
-      const mid = segs.length > 2 ? segs.slice(1).join('/') : (e?.name ?? r.id);
-      const trail: { label: string; href: string | null }[] = [
-        home,
-        { label: `/${pluralOf(kindOf(r.id))}`, href: kindHref(kindOf(r.id)) },
-        { label: mid, href: r.file ? entryHref(r.id) : null },
-      ];
-      if (r.file) trail.push({ label: r.file.split('/').pop() ?? r.file, href: null });
-      return trail;
-    }
-    return [home, { label: 'missing', href: null }];
-  };
+  // Catalog loads for this source; a project or stack switch reloads, nothing else does.
+  createEffect(() => {
+    source();
+    untrack(() => void load());
+  });
+
+  // A new route clears the prompt and the cursor, like the web hashchange.
+  createEffect(
+    on(
+      () => props.segs.join('/'),
+      () => {
+        untrack(clearQuery);
+        setSel(-1);
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      },
+      { defer: true },
+    ),
+  );
+
+  createEffect(on(q, () => setSel(-1), { defer: true }));
+
+  createEffect(
+    on(
+      sel,
+      (i) => {
+        if (i >= 0) document.querySelector(`[data-row="${i}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      },
+      { defer: true },
+    ),
+  );
 
   return (
     <>
@@ -275,152 +327,132 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           onInput={(e) => setQ(e.currentTarget.value)}
         />
       </div>
-      <Show when={loading()}>
-        <Empty>(._.) loading…</Empty>
-      </Show>
-      <Show when={note()}>
-        <CliErr text={note() as string} />
-      </Show>
-      <Show when={!loading() && !note()}>
-        <Show when={searching()} fallback={<Routed route={route()} />}>
-          <SearchView
-            entries={scoreEntries(entries(), q())}
-            uncommitted={uncommitted()}
-            sel={sel()}
-            entryHref={entryHref}
-          />
-        </Show>
+      <Show when={!note()} fallback={<CliErr text={note() as string} />}>
+        <Switch>
+          <Match when={!loaded()}>
+            <Empty>(._.) loading…</Empty>
+          </Match>
+          <Match when={!entries().length}>
+            <Empty>(._.) none</Empty>
+          </Match>
+          <Match when={listed() !== null}>
+            <EntryList
+              byId={byId()}
+              entries={listed() ?? []}
+              uncommitted={uncommitted()}
+              sel={sel()}
+              entryHref={entryHref}
+            />
+          </Match>
+          <Match when={route().kind === 'home' && !searching()}>
+            <KindHome agg={agg()} entries={entries()} sel={sel()} kindHref={kindHref} allHref={allHref()} />
+          </Match>
+          <Match when={grouped()}>
+            {(g) => (
+              <ComponentKindView
+                groups={g().groups}
+                ungrouped={g().ungrouped}
+                uncommitted={uncommitted()}
+                sel={sel()}
+                entryHref={entryHref}
+              />
+            )}
+          </Match>
+          <Match when={route().kind === 'entry'}>
+            <EntryDetail
+              scenario={props.scenario}
+              id={entryId()}
+              file={entryFile()}
+              source={source()}
+              entries={entries()}
+              index={index()}
+              sel={sel()}
+              entryHref={entryHref}
+              fileHref={fileHref}
+              onFiles={setEntryFiles}
+              onImported={() => void load()}
+            />
+          </Match>
+          <Match when={route().kind === 'missing'}>
+            <Empty>(o_O) not found</Empty>
+          </Match>
+        </Switch>
       </Show>
     </>
   );
-
-  function Routed(props2: { route: Route }) {
-    const r = props2.route;
-    if (r.kind === 'home') {
-      return <KindHome entries={entries()} sel={sel()} kindHref={kindHref} allHref={href(props.scenario, 'browse', 'all')} />;
-    }
-    if (r.kind === 'all') {
-      return (
-        <KindView
-          label="id"
-          entries={[...entries()].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind))}
-          uncommitted={uncommitted()}
-          sel={sel()}
-          entryHref={entryHref}
-        />
-      );
-    }
-    if (r.kind === 'kind') {
-      const list = entries().filter((e) => e.kind === r.kindSingular);
-      if (r.kindSingular === 'component') {
-        const g = groupComponents(list);
-        return (
-          <ComponentKindView
-            groups={g.groups}
-            ungrouped={g.ungrouped}
-            uncommitted={uncommitted()}
-            sel={sel()}
-            entryHref={entryHref}
-          />
-        );
-      }
-      return (
-        <KindView
-          label="name"
-          entries={list}
-          uncommitted={uncommitted()}
-          sel={sel()}
-          entryHref={entryHref}
-        />
-      );
-    }
-    if (r.kind === 'entry') {
-      return (
-        <EntryDetail
-          scenario={props.scenario}
-          id={r.id}
-          file={r.file}
-          entries={entries()}
-          uncommitted={uncommitted()}
-          sel={sel()}
-          entryHref={entryHref}
-          fileHref={fileHref}
-          onFiles={setEntryFiles}
-        />
-      );
-    }
-    return <Empty>(o_O) not found</Empty>;
-  }
 }
 
-/** Row thumbnail, fetched when it scrolls into view (list carries the name). */
-function RowThumb(props: { id: string; file: string }) {
-  const [src, setSrc] = createSignal<string | null>(null);
-  let imgEl: HTMLImageElement | undefined;
-  onMount(() => {
-    const load = () => {
-      const c = config();
-      stackRun('show', showFileArgs(props.id, props.file), c?.project ?? '.', c?.stackPath).then(
-        (out) => {
-          try {
-            const b = toShowFile(fromStackOut<ShowFileJson>(out));
-            if (b.base64) setSrc(`data:${mimeFor(props.file)};base64,${b.base64}`);
-          } catch {
-            /* leave the thumbnail out */
-          }
-        },
-        () => {},
-      );
-    };
-    if (typeof IntersectionObserver === 'undefined' || !imgEl) {
-      load();
-      return;
-    }
-    const el = imgEl;
-    const io = new IntersectionObserver(
-      (es) => {
-        if (es.some((x) => x.isIntersecting)) {
-          io.disconnect();
-          load();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    io.observe(el);
-    onCleanup(() => io.disconnect());
-  });
+/** One keyboard-cursor target: `data-row` index plus the selected attribute. */
+function Krow(props: { index: number; sel: number; href: string; zero: boolean; children: JSX.Element }) {
+  const selected = createMemo(() => props.sel === props.index);
   return (
-    <Show when={src()}>
-      <img ref={imgEl} class="rthumb" src={src() as string} alt="" loading="lazy" />
-    </Show>
+    <a
+      class={`krow${props.zero ? ' zero' : ''}`}
+      href={props.href}
+      data-row={props.index}
+      data-nav=""
+      data-sel={selected() ? '' : undefined}
+    >
+      {props.children}
+    </a>
   );
 }
 
-/** One catalog row: sprite, name, dotted leader, thumb, face, size. */
+/** One catalog row: sprite, name, dotted leader, preview, face, size. */
 function EntryRow(props: {
   e: JsonEntry;
-  label: string;
+  byId: boolean;
   uncommitted: Set<string>;
   index: number;
-  sel: boolean;
+  sel: number;
   entryHref: (id: string) => string;
 }) {
-  const m = entryMarkers(props.e, props.uncommitted);
+  let rowEl: HTMLAnchorElement | undefined;
+  const selected = createMemo(() => props.sel === props.index);
+  const markers = () => entryMarkers(props.e, props.uncommitted);
+  const [thumb, setThumb] = createSignal<string | null>(null);
+
+  onMount(() => {
+    const file = props.e.preview;
+    if (!file || !rowEl) return;
+    const id = props.e.id;
+    const c = config();
+    const key = previewKey(sourceKey(c), id, file);
+    // Revisits render from the cache with no fetch at all.
+    const hit = previewCache.peek(key);
+    if (hit !== undefined) {
+      setThumb(hit);
+      return;
+    }
+    // Fetch only once the row is near the viewport; skip rows scrolled past before their turn.
+    let alive = true;
+    const stop = whenVisible(rowEl, () => {
+      void previewCache
+        .load(key, () => fetchImageUrl(c, id, file), () => alive)
+        .then((url) => {
+          if (alive && url) setThumb(url);
+        });
+    });
+    onCleanup(() => {
+      alive = false;
+      stop();
+    });
+  });
+
   return (
     <a
+      ref={rowEl}
       class="row"
       href={props.entryHref(props.e.id)}
       data-row={props.index}
       data-nav=""
-      data-sel={props.sel ? '' : undefined}
+      data-sel={selected() ? '' : undefined}
     >
       <Sprite kind={props.e.kind} origin={props.e.origin} />
-      <span class="nm">{props.label}</span>
-      <Markers notCommitted={m.notCommitted} uncommittedInStack={m.uncommittedInStack} />
+      <span class="nm">{props.byId ? props.e.id : (props.e.name ?? props.e.id)}</span>
+      <Markers notCommitted={markers().notCommitted} uncommittedInStack={markers().uncommittedInStack} />
       <span class="lead" aria-hidden="true" />
-      <Show when={props.e.preview}>
-        <RowThumb id={props.e.id} file={props.e.preview as string} />
-      </Show>
+      <Show when={thumb()}>{(src) => <img class="rthumb" src={src()} alt="" />}</Show>
       <Face status={props.e.status} />
       <span class="num">{`${props.e.files}f ${fmtBytes(props.e.bytes)}`}</span>
     </a>
@@ -428,50 +460,41 @@ function EntryRow(props: {
 }
 
 function KindHome(props: {
+  agg: Agg;
   entries: JsonEntry[];
   sel: number;
   kindHref: (kind: string) => string;
   allHref: string;
 }) {
-  const agg = () => kindAgg(props.entries);
-  const max = () => Math.max(1, ...agg().stats.map((s) => s.n));
-  const tot = () => agg().stats.reduce((a, s) => a + s.bytes, 0);
+  const max = () => Math.max(1, ...props.agg.stats.map((s) => s.n));
   return (
     <>
-      <p class="lede">
-        {agg().total} things{tot() ? `, ${fmtBytes(tot())}` : ''} to import from.
-      </p>
       <div class="krows">
-        <For each={agg().stats}>
+        <For each={props.agg.stats}>
           {(s, i) => (
-            <a
-              class={`krow${s.n ? '' : ' zero'}`}
-              href={props.kindHref(s.kind)}
-              data-row={i()}
-              data-nav=""
-              data-sel={props.sel === i() ? '' : undefined}
-            >
+            <Krow index={i()} sel={props.sel} href={props.kindHref(s.kind)} zero={!s.n}>
               <Sprite kind={s.kind} />
               <span class="nm">{pluralOf(s.kind)}</span>
               <Bar n={s.n} max={max()} />
               <span class="num">{s.n}</span>
-            </a>
+            </Krow>
           )}
         </For>
-        <a class="krow" href={props.allHref} data-row={agg().stats.length} data-nav="" data-sel={props.sel === agg().stats.length ? '' : undefined}>
+        <Krow index={props.agg.stats.length} sel={props.sel} href={props.allHref} zero={false}>
           <span class="sp">~</span>
           <span class="nm">all</span>
-          <span class="bar dimtxt">everything, one list</span>
-          <span class="num">{agg().total}</span>
-        </a>
+          <span class="bar" aria-hidden="true" />
+          <span class="num">{props.agg.total}</span>
+        </Krow>
       </div>
       <Legend entries={props.entries} />
     </>
   );
 }
 
-function KindView(props: {
-  label: 'name' | 'id';
+/** Flat entry list: the kind view, the `all` list and search results. */
+function EntryList(props: {
+  byId: boolean;
   entries: JsonEntry[];
   uncommitted: Set<string>;
   sel: number;
@@ -484,10 +507,10 @@ function KindView(props: {
           {(e, i) => (
             <EntryRow
               e={e}
-              label={props.label === 'id' ? e.id : (e.name ?? e.id)}
+              byId={props.byId}
               uncommitted={props.uncommitted}
               index={i()}
-              sel={props.sel === i()}
+              sel={props.sel}
               entryHref={props.entryHref}
             />
           )}
@@ -500,9 +523,8 @@ function KindView(props: {
 /**
  * Components kind view, grouped by library: one header per library
  * (`components/<lib>`, member count, extends/default markers), member rows
- * beneath, and a dim `stack import components/<lib>` hint. Headers carry no
- * data-row, so the keyboard cursor skips them; member indices continue the
- * rows() order across groups (then ungrouped rows).
+ * beneath. Headers carry no data-row, so the keyboard cursor skips them;
+ * member indices continue the rows() order across groups (then ungrouped rows).
  */
 function ComponentKindView(props: {
   groups: LibraryGroup[];
@@ -514,7 +536,7 @@ function ComponentKindView(props: {
   type Block =
     | { kind: 'lib'; lib: LibraryGroup['lib']; members: JsonEntry[]; start: number }
     | { kind: 'plain'; members: JsonEntry[]; start: number };
-  const blocks = (): Block[] => {
+  const blocks = createMemo((): Block[] => {
     const out: Block[] = [];
     let at = 0;
     for (const g of props.groups) {
@@ -523,11 +545,9 @@ function ComponentKindView(props: {
     }
     if (props.ungrouped.length) out.push({ kind: 'plain', members: props.ungrouped, start: at });
     return out;
-  };
-  const total = () =>
-    props.groups.reduce((a, g) => a + g.members.length, 0) + props.ungrouped.length;
+  });
   return (
-    <Show when={total()} fallback={<Empty>(._.) none</Empty>}>
+    <Show when={blocks().length} fallback={<Empty>(._.) none</Empty>}>
       <div>
         <For each={blocks()}>
           {(b) =>
@@ -538,16 +558,15 @@ function ComponentKindView(props: {
                   <span class="nm">components/{b.lib.name}</span>
                   <span class="dimtxt">{libraryMeta(b.lib, b.members.length)}</span>
                 </div>
-                <p class="dimtxt libhint">stack import components/{b.lib.name}</p>
                 <div class="rows">
                   <For each={b.members}>
                     {(e, i) => (
                       <EntryRow
                         e={e}
-                        label={e.name ?? e.id}
+                        byId={false}
                         uncommitted={props.uncommitted}
                         index={b.start + i()}
-                        sel={props.sel === b.start + i()}
+                        sel={props.sel}
                         entryHref={props.entryHref}
                       />
                     )}
@@ -560,10 +579,10 @@ function ComponentKindView(props: {
                   {(e, i) => (
                     <EntryRow
                       e={e}
-                      label={e.name ?? e.id}
+                      byId={false}
                       uncommitted={props.uncommitted}
                       index={b.start + i()}
-                      sel={props.sel === b.start + i()}
+                      sel={props.sel}
                       entryHref={props.entryHref}
                     />
                   )}
@@ -577,37 +596,18 @@ function ComponentKindView(props: {
   );
 }
 
-function SearchView(props: {
-  entries: JsonEntry[];
-  uncommitted: Set<string>;
-  sel: number;
-  entryHref: (id: string) => string;
-}) {
-  return (
-    <Show when={props.entries.length} fallback={<Empty>(._.) none</Empty>}>
-      <div class="rows">
-        <For each={props.entries}>
-          {(e, i) => (
-            <EntryRow
-              e={e}
-              label={e.id}
-              uncommitted={props.uncommitted}
-              index={i()}
-              sel={props.sel === i()}
-              entryHref={props.entryHref}
-            />
-          )}
-        </For>
-      </div>
-    </Show>
-  );
+/** Image bytes as a data URL for a row thumbnail or preview; undefined when the fetch failed. */
+async function fetchImageUrl(c: AppConfig | null, id: string, file: string): Promise<string | null | undefined> {
+  try {
+    const out = await stackRun('show', showFileArgs(id, file), c?.project ?? '.', c?.stackPath);
+    const b = toShowFile(fromStackOut<ShowFileJson>(out));
+    return b.base64 ? `data:${mimeFor(file)};base64,${b.base64}` : null;
+  } catch {
+    return undefined;
+  }
 }
 
-type Doc = ReturnType<typeof toShowDoc>;
-type FileBody = ReturnType<typeof toShowFile>;
-
-async function showFile(id: string, file: string): Promise<FileBody> {
-  const c = config();
+async function showFile(c: AppConfig | null, id: string, file: string): Promise<FileBody> {
   const out = await stackRun('show', showFileArgs(id, file), c?.project ?? '.', c?.stackPath);
   return toShowFile(fromStackOut<ShowFileJson>(out));
 }
@@ -616,12 +616,15 @@ function EntryDetail(props: {
   scenario: string;
   id: string;
   file: string | null;
+  /** project + stack checkout key: a change here refetches, anything else does not. */
+  source: string;
   entries: JsonEntry[];
-  uncommitted: Set<string>;
+  index: CatalogIndex;
   sel: number;
   entryHref: (id: string) => string;
   fileHref: (id: string, file: string) => string;
   onFiles: (files: ShowFile[]) => void;
+  onImported: () => void;
 }) {
   const [doc, setDoc] = createSignal<Doc | null>(null);
   const [error, setError] = createSignal<string | null>(null);
@@ -631,63 +634,86 @@ function EntryDetail(props: {
   const [pending, setPending] = createSignal(false);
   const [fileBody, setFileBody] = createSignal<FileBody | null>(null);
   const [fileNote, setFileNote] = createSignal<string | null>(null);
-  const [previews, setPreviews] = createSignal<{ path: string; base64: string }[]>([]);
+  const [previews, setPreviews] = createSignal<{ path: string; url: string }[]>([]);
+  let docGen = 0;
+  let bodyGen = 0;
 
-  const e = () => props.entries.find((x) => x.id === props.id) ?? null;
-  // The web shows the open file, defaulting to the entry doc, under h2.
-  const bodyPath = () => props.file ?? e()?.doc.slice(props.id.length + 1) ?? null;
-
-  createEffect(() => {
-    const id = props.id;
-    const c = config();
-    setDoc(null);
-    setError(null);
-    setSections(null);
-    setFailed(null);
-    setPreviews([]);
-    props.onFiles([]);
-    stackRun('show', [id, '--json'], c?.project ?? '.', c?.stackPath).then(
-      (out) => {
-        try {
-          const d = toShowDoc(fromStackOut<ShowJson>(out));
-          setDoc(d);
-          props.onFiles(d.files);
-          const imgs = d.files.filter((f) => IMG_RE.test(f.path)).slice(0, 4);
-          void Promise.all(
-            imgs.map((f) =>
-              showFile(id, f.path).then(
-                (b) => (b.base64 ? { path: f.path, base64: b.base64 } : null),
-                () => null,
-              ),
-            ),
-          ).then((got) => setPreviews(got.filter((g): g is { path: string; base64: string } => !!g)));
-        } catch (err) {
-          setError(errText(err));
-        }
-      },
-      (err) => setError(errText(err)),
-    );
-  });
-
-  createEffect(() => {
-    const p = bodyPath();
-    setFileBody(null);
-    setFileNote(null);
-    if (!p) return;
-    showFile(props.id, p).then(
-      (b) => setFileBody(b),
-      (err) => setFileNote(errText(err)),
-    );
-  });
-
-  const locked = () => lock().rows.find((r) => r.id === props.id) ?? null;
-  const byId = () => new Map(props.entries.map((x) => [x.id, x]));
-  const knownLinks = (ids: string[]) => ids.filter((id) => byId().has(id));
-  const source = () => {
+  const e = createMemo(() => props.index.byId.get(props.id) ?? null);
+  // The open file, defaulting to the entry doc, under h2. Memoized so a list refresh does not refetch it.
+  const bodyPath = createMemo(() => props.file ?? e()?.doc.slice(props.id.length + 1) ?? null);
+  const locked = createMemo(() => lock().rows.find((r) => r.id === props.id) ?? null);
+  const citedBy = (): string[] => props.index.citedBy.get(props.id) ?? [];
+  const linked = (ids: string[] | undefined): string[] => (ids ?? []).filter((id) => props.index.byId.has(id));
+  const upstream = createMemo(() => {
     const s = doc()?.manifest['source'];
     return s && typeof s === 'object' ? (s as Record<string, unknown>) : null;
+  });
+  const upstreamUrl = (): string | null => {
+    const u = upstream()?.['url'];
+    return typeof u === 'string' ? u : null;
   };
-  const sourceUrl = () => (typeof source()?.['url'] === 'string' ? (source()?.['url'] as string) : null);
+
+  // Doc and previews refetch for this id and source only, never for config edits.
+  createEffect(
+    on(
+      [() => props.id, () => props.source],
+      ([id, source]) => {
+        const c = config();
+        const gen = ++docGen;
+        setDoc(null);
+        setError(null);
+        setSections(null);
+        setFailed(null);
+        setPreviews([]);
+        props.onFiles([]);
+        stackRun('show', [id, '--json'], c?.project ?? '.', c?.stackPath).then(
+          (out) => {
+            if (gen !== docGen) return;
+            try {
+              const d = toShowDoc(fromStackOut<ShowJson>(out));
+              setDoc(d);
+              props.onFiles(d.files);
+              const imgs = d.files.filter((f) => IMG_RE.test(f.path)).slice(0, 4);
+              void Promise.all(
+                imgs.map((f) =>
+                  previewCache
+                    .load(previewKey(source, id, f.path), () => fetchImageUrl(c, id, f.path), () => gen === docGen)
+                    .then((url) => (url ? { path: f.path, url } : null)),
+                ),
+              ).then((got) => {
+                if (gen === docGen) setPreviews(got.filter((g): g is { path: string; url: string } => g !== null));
+              });
+            } catch (err) {
+              setError(errText(err));
+            }
+          },
+          (err) => {
+            if (gen === docGen) setError(errText(err));
+          },
+        );
+      },
+    ),
+  );
+
+  createEffect(
+    on(
+      [bodyPath, () => props.id, () => props.source],
+      ([p, id]) => {
+        const gen = ++bodyGen;
+        setFileBody(null);
+        setFileNote(null);
+        if (!p) return;
+        showFile(config(), id, p).then(
+          (b) => {
+            if (gen === bodyGen) setFileBody(b);
+          },
+          (err) => {
+            if (gen === bodyGen) setFileNote(errText(err));
+          },
+        );
+      },
+    ),
+  );
 
   async function doImport() {
     const c = config();
@@ -700,6 +726,7 @@ function EntryDetail(props: {
       const out = await stackRun('import', importArgs(props.id, dest), c.project, c.stackPath);
       setSections(describeImport(fromStackOut(out)));
       await refreshLock();
+      props.onImported();
     } catch (err) {
       setFailed(errText(err));
     } finally {
@@ -711,9 +738,7 @@ function EntryDetail(props: {
 
   return (
     <div>
-      <Show when={error()}>
-        <CliErr text={error() as string} />
-      </Show>
+      <Show when={error()}>{(msg) => <CliErr text={msg()} />}</Show>
       <Show when={doc()}>
         {(d) => {
           const size = d().files.reduce((a, f) => a + f.size, 0);
@@ -729,25 +754,11 @@ function EntryDetail(props: {
               </Show>
               <Show when={!d().committed}>
                 <p class="conflict" role="alert">
-                  not-committed: this entry is not in the stack's HEAD commit, so it cannot be
-                  imported yet — commit it to the stack first.
+                  not committed in the stack: can't import
                 </p>
               </Show>
-              <Show when={locked()}>
-                <p>
-                  imported → {(locked() as { path: string }).path}{' '}
-                  <a href={href(props.scenario, 'installed')}>installed</a>
-                </p>
-              </Show>
+              <Show when={locked()}>{(l) => <p>imported → {l().path}</p>}</Show>
               <dl>
-                <dt>status</dt>
-                <dd>
-                  <Face status={e()?.status ?? ''} /> {e()?.status ?? ''}
-                </dd>
-                <dt>origin</dt>
-                <dd>
-                  <Sprite kind={e()?.kind ?? ''} origin={e()?.origin ?? ''} /> {e()?.origin ?? ''}
-                </dd>
                 <Show when={d().usage}>
                   <dt>usage</dt>
                   <dd>{d().usage}</dd>
@@ -766,103 +777,80 @@ function EntryDetail(props: {
                     </div>
                   </dd>
                 </Show>
-                <Show when={e()?.requires?.length}>
+                <Show when={linked(e()?.requires).length}>
                   <dt>requires</dt>
                   <dd>
                     <div class="rlinks">
-                      <For each={knownLinks(e()?.requires ?? [])}>
-                        {(r) => <a href={props.entryHref(r)}>{byId().get(r)?.name ?? r}</a>}
+                      <For each={linked(e()?.requires)}>
+                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
                       </For>
                     </div>
                   </dd>
                 </Show>
-                <Show when={e()?.related?.length}>
+                <Show when={linked(e()?.related).length}>
                   <dt>related</dt>
                   <dd>
                     <div class="rlinks">
-                      <For each={knownLinks(e()?.related ?? [])}>
-                        {(r) => <a href={props.entryHref(r)}>{byId().get(r)?.name ?? r}</a>}
+                      <For each={linked(e()?.related)}>
+                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
                       </For>
                     </div>
                   </dd>
                 </Show>
-                <Show when={citedBy(props.entries, props.id).length}>
+                <Show when={citedBy().length}>
                   <dt>cited by</dt>
                   <dd>
                     <div class="rlinks">
-                      <For each={citedBy(props.entries, props.id)}>
-                        {(r) => <a href={props.entryHref(r)}>{byId().get(r)?.name ?? r}</a>}
+                      <For each={citedBy()}>
+                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
                       </For>
                     </div>
                   </dd>
                 </Show>
-                <Show when={source()}>
+                <Show when={upstream()}>
                   <dt>upstream</dt>
                   <dd>
-                    <Show when={sourceUrl() && /^https?:/.test(sourceUrl() as string)} fallback={sourceUrl() ?? ''}>
-                      <a href={sourceUrl() as string} target="_blank" rel="noopener noreferrer">
-                        {(sourceUrl() as string).replace(/^https?:\/\/(www\.)?/, '')}
+                    <Show
+                      when={upstreamUrl() && /^https?:/.test(upstreamUrl() as string)}
+                      fallback={upstreamUrl() ?? ''}
+                    >
+                      <a href={upstreamUrl() as string} target="_blank" rel="noopener noreferrer">
+                        {(upstreamUrl() as string).replace(/^https?:\/\/(www\.)?/, '')}
                       </a>
                     </Show>
-                    <Show when={typeof source()?.['ref'] === 'string'}>
-                      <span class="dim">{` @ ${String(source()?.['ref']).slice(0, 7)}`}</span>
+                    <Show when={typeof upstream()?.['ref'] === 'string'}>
+                      <span class="dim">{` @ ${String(upstream()?.['ref']).slice(0, 7)}`}</span>
                     </Show>
-                    <Show when={typeof source()?.['license'] === 'string'}>
-                      <span class="dim">{` ${source()?.['license']}`}</span>
+                    <Show when={typeof upstream()?.['license'] === 'string'}>
+                      <span class="dim">{` ${upstream()?.['license']}`}</span>
                     </Show>
-                    <Show when={source()?.['modified']}>
+                    <Show when={upstream()?.['modified']}>
                       <span class="dim"> modified</span>
                     </Show>
                   </dd>
                 </Show>
               </dl>
 
-              <h2>import</h2>
-              <Show
-                when={config()?.project}
-                fallback={
-                  <p class="dimtxt">
-                    pick a <a href={href(props.scenario, 'project')}>project</a> first.
-                  </p>
-                }
-              >
-                <Show
-                  when={!locked()}
-                  fallback={
-                    <p>
-                      imported → {(locked() as { path: string }).path}{' '}
-                      <a href={href(props.scenario, 'installed')}>installed</a>
-                    </p>
-                  }
-                >
-                  <Show
-                    when={d().committed}
-                    fallback={
-                      <p class="dimtxt">import is disabled until this entry is committed to the stack.</p>
-                    }
-                  >
-                    <p>
-                      <input
-                        type="text"
-                        value={to()}
-                        onInput={(ev) => setTo(ev.currentTarget.value)}
-                        placeholder="--to dir (optional)"
-                        aria-label="import destination inside the project"
-                        size={24}
-                      />{' '}
-                      <button class="btn" disabled={pending()} onClick={() => void doImport()}>
-                        {pending() ? 'importing' : 'import'}
-                      </button>
-                    </p>
-                    <p class="dimtxt">refuses before writing anything if files differ — never overwrites.</p>
-                  </Show>
-                </Show>
+              <Show when={!locked() && d().committed}>
+                <h2>import</h2>
+                <p>
+                  <input
+                    type="text"
+                    value={to()}
+                    onInput={(ev) => setTo(ev.currentTarget.value)}
+                    placeholder="--to"
+                    aria-label="import destination inside the project"
+                    size={24}
+                  />{' '}
+                  <button class="btn" disabled={pending()} onClick={() => void doImport()}>
+                    {pending() ? 'importing' : 'import'}
+                  </button>
+                </p>
               </Show>
 
               <Show when={lookalikes().length > 0}>
                 <p class="conflict" role="alert">
-                  untracked look-alike: these files already exist here with other content. move them
-                  aside or import with --to instead — nothing was written.
+                  untracked look-alikes, nothing written:
                 </p>
                 <pre class="raw">{lookalikes().join('\n')}</pre>
               </Show>
@@ -870,7 +858,7 @@ function EntryDetail(props: {
                 <CliErr text={failed() as string} />
               </Show>
               <Show when={sections()}>
-                <OpResult sections={sections() as OpSection[]} />
+                {(s) => <OpResult sections={s()} />}
               </Show>
 
               <Show when={previews().length}>
@@ -880,7 +868,7 @@ function EntryDetail(props: {
                     <For each={previews()}>
                       {(p) => (
                         <a href={props.fileHref(props.id, p.path)}>
-                          <img src={`data:${mimeFor(p.path)};base64,${p.base64}`} alt={p.path} loading="lazy" />
+                          <img src={p.url} alt={p.path} />
                         </a>
                       )}
                     </For>
@@ -901,21 +889,23 @@ function EntryDetail(props: {
                 />
               </Show>
               <Show when={bodyPath()}>
-                <h2>{bodyPath()}</h2>
-                <Show when={fileNote()}>
-                  <p class="note">{fileNote()}</p>
-                </Show>
-                <Show when={fileBody()}>
-                  {(b) => (
-                    <FileView
-                      body={b()}
-                      entries={props.entries}
-                      entryId={props.id}
-                      entryHref={props.entryHref}
-                      fileHref={(id, f) => props.fileHref(id, f)}
-                    />
-                  )}
-                </Show>
+                {(p) => (
+                  <>
+                    <h2>{p()}</h2>
+                    <Show when={fileNote()}>{(msg) => <p class="note">{msg()}</p>}</Show>
+                    <Show when={fileBody()}>
+                      {(b) => (
+                        <FileView
+                          body={b()}
+                          entries={props.entries}
+                          entryId={props.id}
+                          entryHref={props.entryHref}
+                          fileHref={props.fileHref}
+                        />
+                      )}
+                    </Show>
+                  </>
+                )}
               </Show>
             </div>
           );

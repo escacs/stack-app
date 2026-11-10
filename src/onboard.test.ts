@@ -1,7 +1,8 @@
-// Tests for the onboarding gate (src/onboard.ts): which screen shows for
-// a config, and cursor movement over the pick rows.
+// Tests for the onboarding gate and top-bar path (src/onboard.ts): which
+// screen shows for a config, cursor movement over the pick rows, and how a
+// project path is shortened in the top bar.
 import { describe, expect, it } from 'vitest';
-import { moveSel, onboardStep } from './onboard';
+import { moveSel, onboardStep, shortPath } from './onboard';
 
 describe('onboardStep', () => {
   it('asks who first, then which project', () => {
@@ -30,5 +31,33 @@ describe('moveSel', () => {
     expect(moveSel(-1, -1, 3)).toBe(2);
     expect(moveSel(-1, 1, 0)).toBe(-1);
     expect(moveSel(0, 1, 0)).toBe(-1);
+  });
+});
+
+describe('shortPath', () => {
+  it('keeps the last two segments of a deep path', () => {
+    expect(shortPath('/home/dev/projects/folio')).toBe('…/projects/folio');
+    expect(shortPath('/a/b/c')).toBe('…/b/c');
+  });
+
+  it('drops trailing slashes before shortening', () => {
+    expect(shortPath('/home/dev/projects/folio/')).toBe('…/projects/folio');
+    expect(shortPath('/home/dev///')).toBe('/home/dev');
+  });
+
+  it('leaves a short path as it is', () => {
+    expect(shortPath('/home/dev')).toBe('/home/dev');
+    expect(shortPath('/home/')).toBe('/home');
+    expect(shortPath('projects/folio')).toBe('projects/folio');
+  });
+
+  it('keeps the root and handles the empty string', () => {
+    expect(shortPath('/')).toBe('/');
+    expect(shortPath('///')).toBe('/');
+    expect(shortPath('')).toBe('');
+  });
+
+  it('accepts Windows separators', () => {
+    expect(shortPath('C:\\Users\\mel\\proj\\')).toBe('…/mel/proj');
   });
 });

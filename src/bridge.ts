@@ -2,6 +2,7 @@
 // surface"). In a plain browser the dev mock (app/dev/mock-app-bridge.js)
 // provides window.__TAURI_INTERNALS__, so invoke() works unchanged.
 import { invoke } from '@tauri-apps/api/core';
+import { withOffline } from './stackArgs';
 
 export type AppConfig = {
   recentProjects: string[];
@@ -71,7 +72,7 @@ export function stackRun(
 ): Promise<StackOut> {
   return invoke('stack_run', {
     subcommand,
-    args,
+    args: withOffline(subcommand, args),
     projectDir,
     ...(stackDir ? { stackDir } : {}),
   });

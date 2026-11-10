@@ -2,7 +2,7 @@
 // scoring, link resolution, kind rollups. The JSX renders (Markdown,
 // FileTree, Legend) are covered by fixture screenshots instead.
 import { describe, expect, it } from 'vitest';
-import { barCells, citedBy, groupComponents, kindAgg, libraryMeta, mdLink, mimeFor, scoreEntries } from './site';
+import { barCells, groupComponents, kindAgg, libraryMeta, mdLink, mimeFor, scoreEntries } from './site';
 import type { JsonEntry } from './json';
 
 const entry = (o: Partial<JsonEntry> & { id: string }): JsonEntry => ({
@@ -59,18 +59,6 @@ describe('scoreEntries', () => {
       entry({ id: 'skills/a', name: 'same' }),
     ];
     expect(scoreEntries(tied, 'same').map((e) => e.id)).toEqual(['skills/a', 'skills/b']);
-  });
-});
-
-describe('citedBy', () => {
-  it('finds requires/related backlinks', () => {
-    const entries = [
-      entry({ id: 'skills/a', requires: ['skills/b'] }),
-      entry({ id: 'skills/b' }),
-      entry({ id: 'skills/c', related: ['skills/b'] }),
-    ];
-    expect(citedBy(entries, 'skills/b')).toEqual(['skills/a', 'skills/c']);
-    expect(citedBy(entries, 'skills/a')).toEqual([]);
   });
 });
 

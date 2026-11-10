@@ -51,7 +51,7 @@ const ALLOW_SUBCOMMANDS: &[&str] = &[
     "preset",
 ];
 
-/// Flags that take a value. `--json` and `--dry-run` (booleans) and `--`
+/// Flags that take a value. `--json`, `--offline` and `--dry-run` (booleans) and `--`
 /// (separator) are handled separately in [`build_argv`].
 const ALLOW_FLAGS: &[&str] = &["--kind", "--to", "--ref", "--file"];
 const KINDS: &[&str] = &[
@@ -133,7 +133,9 @@ impl BuiltArgv {
 }
 
 /// Validate `args` for `sub`. `project` must already be canonical.
-/// Accepts `--json` (boolean, passed through to the CLI), `--dry-run`
+/// Accepts `--json` (boolean, passed through to the CLI), `--offline`
+/// (boolean, read-only list/search/show/status: skips the remote-cache
+/// network sync, ~1s on status), `--dry-run`
 /// (boolean, `preset apply` only) and `--` (separator: everything after it
 /// is positional, never a flag).
 fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, String> {
@@ -144,6 +146,7 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
     let mut file: Option<&str> = None;
     let mut json = false;
     let mut dryrun = false;
+    let mut offline = false;
     let mut dashdash = false;
     let mut i = 0;
     while i < args.len() {
@@ -156,6 +159,8 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
             json = true;
         } else if a == "--dry-run" {
             dryrun = true;
+        } else if a == "--offline" {
+            offline = true;
         } else if a.starts_with('-') {
             if !ALLOW_FLAGS.contains(&a) {
                 return Err(format!("flag '{a}' is not allowed"));
@@ -197,8 +202,11 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
     if dryrun && sub != "preset" {
         return Err("--dry-run is only supported by preset apply".to_string());
     }
+    if offline && !matches!(sub, "list" | "search" | "show" | "status") {
+        return Err("--offline is only supported by list, search, show and status".to_string());
+    }
     // Emit flags in one deterministic order: --kind, --to, --ref, --file,
-    // --dry-run, --json.
+    // --dry-run, --offline, --json.
     let flag_vec = |with_kind: bool,
                     with_to: bool,
                     with_ref: bool,
@@ -229,6 +237,9 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
         }
         if with_dryrun && dryrun {
             flags.push("--dry-run".to_string());
+        }
+        if offline {
+            flags.push("--offline".to_string());
         }
         if json {
             flags.push("--json".to_string());
@@ -598,7 +609,7 @@ fn resolve_stack_dir_inner(
             cur = dir.parent();
         }
     }
-    Err("no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone in settings (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it."
+    Err("no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it."
         .to_string())
 }
 
@@ -635,13 +646,20 @@ fn validation_error(path: &Path, git: bool, cli: bool, node: &NodeStatus) -> Opt
     if !git {
         problems.push("it is not a git checkout with a HEAD commit".to_string());
     }
-    let mut msg = format!(
-        "'{}' is not a usable stack checkout: {}. Pick the escacs/stack clone (the folder containing tools/stack/cli.mjs) in settings.",
-        path.display(),
-        problems.join("; ")
-    );
+    // Only node missing: say that, and do not blame a checkout that is fine.
+    let mut msg = if problems.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "'{}' is not a usable stack checkout: {}. Pick the escacs/stack clone (the folder containing tools/stack/cli.mjs).",
+            path.display(),
+            problems.join("; ")
+        )
+    };
     if !node.ok {
-        msg.push(' ');
+        if !msg.is_empty() {
+            msg.push(' ');
+        }
         msg.push_str(
             node.error
                 .as_deref()
@@ -1030,6 +1048,22 @@ mod tests {
     }
 
     #[test]
+    fn offline_flag_is_read_only_and_ordered_before_json() {
+        let p = proj("offline");
+        let argv = build_argv("status", &args(&["--json", "--offline"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--offline", "--json"]);
+        let argv = build_argv("show", &args(&["--offline", "skills/a", "--json"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--offline", "--json"]);
+        assert!(build_argv("list", &args(&["--offline"]), &p).is_ok());
+        assert!(build_argv("search", &args(&["q", "--offline"]), &p).is_ok());
+        // Writes keep their network-synced view of the stack.
+        for sub in ["import", "update", "remove", "sync", "init", "gitignore", "preset"] {
+            assert!(build_argv(sub, &args(&["--offline"]), &p).is_err(), "{sub}");
+        }
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
     fn json_flag_passes_through() {
         let p = proj("json");
         let argv = build_argv("list", &args(&["--json"]), &p).unwrap();
@@ -1195,7 +1229,22 @@ mod tests {
         assert!(!report.git && !report.cli);
         let err = report.error.expect("one error message");
         assert!(err.contains(&p.display().to_string()));
-        assert!(err.contains("settings"));
+        assert!(err.contains("Pick the escacs/stack clone"));
+        assert!(!err.contains("settings"));
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn node_only_failure_does_not_blame_the_checkout() {
+        let p = proj("nodeonly");
+        let node = NodeStatus {
+            ok: false,
+            version: None,
+            major: None,
+            error: Some("node missing".to_string()),
+        };
+        let err = validation_error(&p, true, true, &node).expect("an error");
+        assert_eq!(err, "node missing");
         let _ = std::fs::remove_dir_all(&p);
     }
 

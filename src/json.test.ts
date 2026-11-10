@@ -16,6 +16,7 @@ import {
   importArgs,
   parseJsonOut,
   presetApplyArgs,
+  presetImportsHint,
   presetListArgs,
   presetShowArgs,
   refusalFiles,
@@ -373,6 +374,21 @@ describe('preset args', () => {
     expect(presetShowArgs('web')).toEqual(['show', 'web', '--json']);
     expect(presetApplyArgs('web')).toEqual(['apply', 'web', '--json']);
     expect(presetApplyArgs('web', true)).toEqual(['apply', 'web', '--dry-run', '--json']);
+  });
+});
+
+describe('preset hint', () => {
+  it('lists each import id, with its destination when it has one', () => {
+    expect(
+      presetImportsHint([
+        { id: 'components/react/button', to: 'src/components/ui' },
+        { id: 'skills/file-pr', to: null },
+      ]),
+    ).toBe('components/react/button → src/components/ui, skills/file-pr');
+  });
+
+  it('says so when a preset imports nothing', () => {
+    expect(presetImportsHint([])).toBe('no imports');
   });
 });
 

@@ -19,11 +19,17 @@ export default function TitleBar() {
       if (w) void fn(w).catch(() => {});
     };
 
+  // A double-click on a window button must not also maximize.
+  const onDbl = (e: MouseEvent) => {
+    if ((e.target as Element).closest('button')) return;
+    act((w) => w.toggleMaximize())();
+  };
+
   return (
     <header
       id="titlebar"
       data-tauri-drag-region
-      onDblClick={act((w) => w.toggleMaximize())}
+      onDblClick={onDbl}
     >
       <span class="tbrand" data-tauri-drag-region>
         stack

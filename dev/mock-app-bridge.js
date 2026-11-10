@@ -67,6 +67,8 @@
     const base = e.payload
       ? ['README.md', 'stack.json', `${e.payload}/AGENTS.md`, `${e.payload}/config.json`]
       : ['README.md', 'stack.json'];
+    // Skills and styles carry SKILL.md as their entry doc (the real layout).
+    if (/^(skills|styles)\//.test(e.id)) base.unshift('SKILL.md');
     // One image-bearing entry so previews and file bodies render.
     if (e.id === 'assets/escacs-mark') base.push('escacs-logo.svg');
     return base;
@@ -446,6 +448,7 @@
       if (a === '--') { dashdash = true; continue; }
       if (a === '--json') { out.json = true; continue; }
       if (a === '--dry-run') { out.dryRun = true; continue; }
+      if (a === '--offline') continue; // read-only network skip, no effect on fixtures
       if (a === '--kind') { out.kind = args[++i]; continue; }
       if (a === '--to') { out.to = args[++i]; continue; }
       if (a === '--file') { out.file = args[++i]; continue; }

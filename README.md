@@ -7,7 +7,17 @@ minimal.
 The stack lives in its own repo; this app shells out to its CLI
 (`node <stack>/tools/stack/cli.mjs …`) and never reimplements the import
 logic. You need both checkouts (anywhere — the app asks where the stack is
-on first run).
+when it cannot find one).
+
+## Using the app
+
+- [docs/USAGE.md](docs/USAGE.md): the screens, keys, row states, actions,
+  where settings live, troubleshooting, and the browser preview.
+- [docs/INSTALL.md](docs/INSTALL.md): installing the AppImage, webview and
+  node prerequisites, stack provisioning, uninstalling.
+- [docs/UPDATES.md](docs/UPDATES.md): how the app updates itself and how a
+  release is cut.
+- [docs/PORTABILITY.md](docs/PORTABILITY.md): distro and glibc support.
 
 ## Prerequisites
 
@@ -31,17 +41,16 @@ Other scripts: `npm run dev` (Vite only), `npm run build`,
 `npm run build:app` (`tauri build --no-bundle`; never ship release bundles
 from here).
 
-On first run the app asks for the stack checkout (folder picker, remembered
-in settings). It also honours the `ESCACS_STACK` env var — the same
-convention as the stack repo's own setup docs.
-
-Packaging, releases and platform notes live in
-[docs/INSTALL.md](docs/INSTALL.md), [docs/UPDATES.md](docs/UPDATES.md) and
-[docs/PORTABILITY.md](docs/PORTABILITY.md).
+On first run the app asks who you are and which project to open. It asks for
+the stack checkout only when it cannot find one; the folder picker saves the
+choice in settings. The `ESCACS_STACK` env var is honoured too, the same
+convention as the stack repo's own setup docs. See
+[docs/USAGE.md](docs/USAGE.md#stack-checkout).
 
 ## Tests
 
-- `npm run test:ui` — vitest: CLI JSON shapes, parsers, router, flows.
+- `npm run test:ui` — vitest (node environment): CLI JSON shapes, parsers,
+  router, onboarding, browse data, argument building, site helpers.
 - `npm run check` — `tsc --noEmit`.
 - `npm test` — Rust unit tests (`cargo test --lib`).
 - Full Rust suite, including the end-to-end shell-out test against a temp
@@ -52,7 +61,7 @@ Packaging, releases and platform notes live in
 
 ## Decision: shell out to the node CLI, not a sidecar
 
-Stack ops (`import`, `status`, `update`, …) run as
+Stack ops (`list`, `show`, `import`, `status`, `update`, …) run as
 `node <stack>/tools/stack/cli.mjs … --project <dir>` from Rust. Considered
 alternative: a Tauri sidecar (bundled binary) or a Rust reimplementation of
 the import logic.
@@ -72,8 +81,8 @@ Shell-out wins because:
    code.
 
 Cost: node must be on PATH at runtime. Mitigated by the `node_status` probe
-(call it at startup and show the error, which names the fix) — every
-`stack_run` re-probes and fails with the same clear message.
+(called at startup; the setup screen shows its error, which names the fix) —
+every `stack_run` re-probes and fails with the same clear message.
 
 Revisit if the app must run where node is absent (offline installs): the
 fallback is packaging `tools/stack/` as a Node single-executable sidecar,
@@ -84,7 +93,8 @@ still without forking the logic.
 Call via `invoke` from `@tauri-apps/api/core`. All names are camelCase;
 `stack_run`/`node_status` snake_case names are the command names, their
 payloads are camelCase. Errors arrive as rejected strings — show them
-verbatim, they are written for users.
+verbatim, they are written for users. The typed wrappers live in
+`src/bridge.ts`.
 
 | Command | Args | Returns |
 |---|---|---|
@@ -94,18 +104,19 @@ verbatim, they are written for users.
 | `add_recent_project` | `{ path: string }` | `AppConfig` (updated) |
 | `validate_project` | `{ path: string }` | `ProjectReport` |
 | `scan_projects` | `{ root?, roots?, stackDir? }` | `ScanOut` |
-| `default_scan_roots` | `{ stackDir? }` | `ScanRoots` |
+| `default_scan_roots` | `{ stackDir? }` | `ScanRoots` (wrapper exists; no current view calls it) |
 | `node_status` | — | `NodeStatus` |
-| `stack_location` | `{ stackDir? }` | `StackLocation` |
+| `stack_location` | `{ stackDir? }` | `StackLocation` (wrapper exists; no current view calls it) |
 | `validate_stack` | `{ stackDir? }` | `StackReport` |
 | `stack_run` | `{ subcommand, args, projectDir, stackDir? }` | `{ stdout, stderr, code, truncated }` |
 
 ```ts
 type AppConfig = {
   recentProjects: string[];   // most recent first, capped at 10
-  stackPath: string | null;   // escacs/stack checkout; folder-picked
-  scanRoot: string | null;    // where to look for projects
-  worker: string | null;      // e.g. "mel"
+  stackPath: string | null;   // escacs/stack checkout override (folder-picked)
+  scanRoot: string | null;    // extra scan root; no UI control, edit config.json
+  scanRoots: string[];        // more scan roots; save_config stores them verbatim
+  worker: string | null;      // e.g. "mel"; a label only, never sent to the stack
   project: string | null;     // currently selected project dir
 };
 type ProjectReport = { path: string; valid: boolean; markers: string[]; errors: string[] };
@@ -120,49 +131,56 @@ type StackReport = { path: string; valid: boolean; source: string; git: boolean;
 `stack_run` allowlist (enforced in Rust before any subprocess starts):
 
 - Subcommands: `list`, `search`, `show`, `import`, `status`, `update`,
-  `remove`, `sync` (restore ignored imports from the lock), `gitignore`
-  (rewrite the managed escacs block), `init` (create `stack.toml`, adopting a
-  legacy `stack.lock.json`), `preset` (`list`, `show <name>`, `apply <name>`).
-  `sync`/`gitignore`/`init` take no args.
-  Everything else (`serve`, `catalog`, `check`, `link-skills`, `path`, …) is
-  rejected, so the UI cannot reach repo-maintenance commands.
-- Flags: only `--kind <kind>`, `--to <project-relative-dir>` (single-entry
-  `import` only), `--ref <rev>`, `--file <entry-relative-path>` (`show`
-  only, for entry file bodies), `--dry-run` (`preset apply` only).
-  `--project` is always set by Rust itself and cannot be overridden.
-- Entry ids are charset-checked; `--to` must be project-relative and is
-  confined (traversal and symlink escapes rejected).
-- `stackDir` resolution order: the settings override (persist in
-  `config.stackPath`, folder-picked), the `ESCACS_STACK` env var, then an
-  upward walk for `tools/stack/cli.mjs` (finds nothing in a normal install —
-  first run must pick a folder or export the var).
+  `remove`, `sync`, `gitignore`, `init`, `preset` (`list`, `show <name>`,
+  `apply <name>`). `sync` and `gitignore` take no args; `init` takes only
+  `--json`. Everything else (`serve`, `catalog`, `check`, `remote`,
+  `link-skills`, `path`, …) is rejected, so the UI cannot reach
+  repo-maintenance commands.
+- Flags: `--kind` (search), `--to <project-relative-dir>` (single-entry
+  import), `--ref` (import, status, update), `--file` (show), `--dry-run`
+  (preset apply), `--offline` (list, search, show, status; the app appends it
+  to `show` and `status`), `--json` (passed through). `--project` is always
+  set by Rust itself and cannot be overridden.
+- Entry ids are charset-checked; `--to` is joined onto the project and
+  confined (traversal, absolute paths and symlink escapes rejected).
+- `stackDir` resolution order: the settings override (`config.stackPath`,
+  folder-picked), the `ESCACS_STACK` env var, then an upward walk for
+  `tools/stack/cli.mjs` from the app's executable, the folder it was built in,
+  and the working folder (finds nothing in a normal install — first run must
+  pick a folder or export the var).
 - Output is capped at 4 MiB per stream (truncation marked via `truncated`).
 
-Startup sequence suggestion: `node_status` → `get_config` → if
-`config.project`, `validate_project` (+ `add_recent_project` on success).
+Startup sequence (`boot()` in `src/store.ts`): `node_status` → app version →
+`get_config` → `validate_stack` → `validate_project` (if `config.project`) →
+`stack_run list worker` → `stack_run status` (if a project is set and node is
+ok). An unusable stack blocks the views until it is fixed (setup screen).
 
 Security contract (enforced in `src-tauri/src/`): operate only inside the
 selected project dir + the stack dir; canonicalize and reject traversal and
 symlinks escaping the project; never run project code; never git
 commit/push; never put credentials anywhere (none are handled, none logged).
 
-Capabilities (`src-tauri/capabilities/default.json`) grant only
-`core:default` and `dialog:allow-open`. Custom `invoke` commands need no
-capability entries; adding a plugin call later means adding its permission.
+Capabilities (`src-tauri/capabilities/default.json`) grant `core:default`,
+window minimize / toggle-maximize / close, `dialog:allow-open`,
+`updater:default` and `process:allow-restart`. App-defined `invoke` commands
+need no capability entries; each plugin call needs its permission.
 
 ## Presets
 
-Presets are named import bundles for setting a project up in one step. The
-Project view lists them with descriptions; each row expands to its imports
-(one id plus `--to` each) and an apply button runs `preset apply`, rendering
-the result like an import log and refreshing the lock. Apply refuses exactly
-like import: nothing is written when files differ.
+Presets are named import plans that the stack keeps in `presets/*.toml`. They
+live at the bottom of the installed view (`src/views/Presets.tsx`), one row
+per preset: name, description, and an `apply` button. Rows do not expand; the
+button's hover title lists what it imports. `apply` runs
+`preset apply <name> --json` through the installed view's op runner
+(`src/views/Status.tsx`), so its busy state and result share the rows' log.
+Apply refuses exactly like import: nothing is written when a target file
+differs.
 
 Wire shapes (`--json`):
 
 - `preset list`: `{command:'preset', action:'list', count, presets:[{name, description, imports:[{id, to}]}]}`
-- `preset show <name>`: `{command:'preset', action:'show', preset:{name, description, source, imports}}`
-- `preset apply <name>`: `{command:'preset', action:'apply', preset, commit, imported:[{id, path, requiredBy?}], already, gitignore}` plus `conflicts` on a `--dry-run` only; the text log mirrors the import log.
+- `preset apply <name>`: `{command:'preset', action:'apply', preset, commit, imported:[{id, path, requiredBy?}], already, gitignore}`, plus `conflicts` on a `--dry-run` only. The app never sends `--dry-run`. The result renders through `describePresetApply` (`src/json.ts`).
+- `preset show <name>` is allowlisted but no current view calls it.
 
 ## Vendored web style (snapshot, not shared source)
 
@@ -171,24 +189,36 @@ Wire shapes (`--json`):
 old live alias is gone: re-copy the file to re-sync, never edit the
 snapshot in place. The website's `web/app.js` stays a read-only behavior
 reference; catalog data reaches the desktop through `stack_run`
-(`list`/`search`/`show --json`), never by importing website code.
+(`list`/`show --json`), never by importing website code.
 
 ## UI verification without the native shell
 
-Per the stack repo's `skills/mock-bridge-ui-verification`:
+Plain browser checks against the mock bridge: POSIX sh and `python3`, no
+bash script. The mock is invented fixture data, so a pass proves the UI
+logic, not the native runtime.
 
 ```sh
 npm run build
-mkdir -p /tmp/stack-app-verify && cp -r dist/* /tmp/stack-app-verify/
-# inject the mock before the app bundle, then serve from the temp dir:
-cd /tmp/stack-app-verify && python3 -I -m http.server 8137 --bind 127.0.0.1
+out=$(mktemp -d)
+cp -r dist/. "$out/"
+cp dev/mock-app-bridge.js "$out/mock-bridge.js"
+python3 -c 'import sys; p=sys.argv[1]; s=open(p,encoding="utf-8").read(); open(p,"w",encoding="utf-8").write(s.replace("<head>","<head><script src=\"/mock-bridge.js\"></script>",1))' "$out/index.html"
+python3 -I -m http.server 8137 --bind 127.0.0.1 --directory "$out"
 ```
 
-Open `http://127.0.0.1:8137/#populated` (`#empty`, `#no-node`, `#fresh` for
-other scenarios). `dev/mock-bridge.js` and `dev/mock-app-bridge.js` mirror
-the wire types above; when they change, update both in the same change. Label
-results "fixture check" — a mock never proves the real runtime. Screenshots
-and scratch stay in `/tmp`, never the repo.
+Open `http://127.0.0.1:8137/#<scenario>,/<route>`, for example
+`#conflicts,/installed`. `dev/mock-app-bridge.js` reads the scenario from the
+hash: `populated` (default), `empty`, `noworker`, `noproject`, `scan`,
+`conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`. Reload
+the page to switch scenario; a hash-only change keeps the old fixture.
+`docs/USAGE.md` §8 lists what each one shows.
+
+The mock cannot exercise the native folder picker, the update feed, the
+startup update event, or real file writes, and its `plugin:app|version` answer
+(0.1.0) is not the release version. Label results "fixture check".
+
+`dev/mock-bridge.js` is an older, minimal mock with three scenarios. When a
+wire type changes, update both mocks in the same change.
 
 ## Layout
 
@@ -197,12 +227,22 @@ package.json vite.config.ts tsconfig.json index.html
 web-vendor/style.css            # snapshot of the stack website's stylesheet
 dev/mock-bridge.js dev/mock-app-bridge.js
 src/                             # SolidJS renderer
+  index.tsx App.tsx app.css ui.tsx site.tsx glide.ts
+  bridge.ts store.ts updater.ts router.ts onboard.ts
+  browseData.ts stackArgs.ts json.ts parse.ts
+  views/
+    Onboard.tsx StackSetup.tsx TopBar.tsx TitleBar.tsx
+    Browse.tsx Status.tsx Presets.tsx StackPath.tsx Updates.tsx
+  *.test.ts                      # vitest, node environment
 src-tauri/
   Cargo.toml build.rs tauri.conf.json Cargo.lock
   capabilities/default.json
   src/{main,lib,config,paths,project,scan,stack}.rs
   tests/stack_e2e.rs
-.github/workflows/check.yml
+docs/                            # INSTALL, UPDATES, PORTABILITY, USAGE
+scripts/                         # install, provision, uninstall (AppImage)
+flatpak/                         # draft manifest, not validated
+.github/workflows/check.yml release.yml flatpak.yml
 ```
 
 Pinned versions follow the stack's `libraries/tauri` and
@@ -235,21 +275,25 @@ to RGB with white corners — the flag is required.
 
 ## First-run manual smoke checklist (needs a display)
 
-Run `npm run dev:app` from the repo root on a machine with a display, then:
+Use a stack checkout with a committed entry such as `skills/file-pr`. Run
+`npm run dev:app` on a machine with a display, then (screens are described in
+[docs/USAGE.md](docs/USAGE.md)):
 
-1. Pick a worker: open `worker`, choose a profile, confirm the top-bar `who`
-   switcher shows it after a relaunch.
-2. Pick a project: open `project`, browse to a folder with a `.git` dir,
-   confirm the markers row lists it.
-3. Init a plain folder: pick a folder with no `stack.toml`, open `status`,
-   confirm the setup section offers `init stack.toml`, press it, confirm
-   `stack.toml` plus the managed `.gitignore` block appear.
-4. Import a skill: open `browse`, search `file-pr`, open the entry, press
-   `import`, confirm the result lists the new `.agents/skills/…` path.
-5. Check the `.gitignore` block: open the project's `.gitignore`, confirm a
-   managed escacs block covers the imported paths.
-6. Edit a file, then status: change one line in the imported skill, open
-   `status`, confirm the row reads `edited` with the file named.
-7. Update: commit a change to that entry in the stack checkout, press
-   `update` in `status`, confirm the row returns to `imported` (or shows a
-   `CONFLICT` section naming the file when both sides changed it).
+1. Who: with no saved user (delete `config.json`, see
+   [USAGE §6](docs/USAGE.md#6-where-things-are-stored)), pick a worker from
+   the who screen, relaunch, and confirm the top bar shows it.
+2. Project: `browse folder` on the project screen, pick a folder with a `.git`
+   dir, and confirm the top bar shows its path.
+3. Installed init: in a folder with no `stack.toml`, open `installed`, press
+   `init stack.toml`, and confirm `stack.toml` and the managed `.gitignore`
+   block exist.
+4. Browse import: search `file-pr`, open the entry, leave `--to` empty, press
+   `import`, and confirm `.agents/skills/file-pr` is listed and gains a row
+   under `installed`. The project's `.gitignore` covers it.
+5. Edited row: change one line in the imported `SKILL.md`; the row reads
+   `edited` with `SKILL.md` named.
+6. Update: commit a change to that entry in the stack, press `update`, and
+   confirm the row returns to `imported`. If both sides changed the same
+   file, it has `<<<<<<<` markers and is listed under `conflicts`.
+7. Remove keeps edits: press `remove` on the edited row, confirm
+   `kept (edited here)` and that the file is still on disk.

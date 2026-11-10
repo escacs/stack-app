@@ -325,6 +325,12 @@ export function presetApplyArgs(name: string, dryRun = false): string[] {
   return dryRun ? ['apply', name, '--dry-run', '--json'] : ['apply', name, '--json'];
 }
 
+/** Hover text for a preset's apply button: what apply will import. */
+export function presetImportsHint(imports: PresetImport[]): string {
+  if (!imports.length) return 'no imports';
+  return imports.map((i) => (i.to ? `${i.id} → ${i.to}` : i.id)).join(', ');
+}
+
 // ------------------------------------------------------------------ op summaries
 
 export type OpSection = { title: string; lines: string[]; tone?: 'bad' | 'dim' };

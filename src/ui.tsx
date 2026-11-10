@@ -25,12 +25,7 @@ export function OpResult(props: { sections: OpSection[]; label?: string }) {
 
 /** CLI stderr surfaced verbatim (plain text, never parsed as data). */
 export function CliErr(props: { text: string }) {
-  return (
-    <div>
-      <p class="conflict" role="alert">the stack command failed — nothing was changed unless it says otherwise.</p>
-      <pre class="raw">{props.text}</pre>
-    </div>
-  );
+  return <pre class="raw conflict" role="alert">{props.text}</pre>;
 }
 
 export function Chip(props: { state: string }) {
@@ -48,12 +43,12 @@ export function Markers(props: { notCommitted: boolean; uncommittedInStack: bool
     <Show when={props.notCommitted || props.uncommittedInStack}>
       <span class="markers">
         <Show when={props.notCommitted}>
-          <span class="marker bad" title="not in the stack's HEAD commit — import refuses it until it is committed">
+          <span class="marker bad" title="not in the stack's HEAD commit. import refuses it until it is committed">
             not-committed
           </span>
         </Show>
         <Show when={props.uncommittedInStack}>
-          <span class="marker" title="the stack worktree holds uncommitted changes for this entry — imports read the committed state">
+          <span class="marker" title="the stack worktree holds uncommitted changes for this entry. imports read the committed state">
             uncommitted-in-stack
           </span>
         </Show>

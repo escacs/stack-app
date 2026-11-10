@@ -127,13 +127,6 @@ export function scoreEntries(entries: JsonEntry[], query: string): JsonEntry[] {
     .map(([, e]) => e);
 }
 
-/** Entries whose requires/related cite this id. */
-export function citedBy(entries: JsonEntry[], id: string): string[] {
-  return entries
-    .filter((e) => [...(e.requires ?? []), ...(e.related ?? [])].includes(id))
-    .map((e) => e.id);
-}
-
 // ------------------------------------------------------------------ kind rollup
 
 export type KindStat = { kind: string; n: number; files: number; bytes: number };
@@ -317,6 +310,18 @@ type MdLink =
 
 const SAFE_URL = /^(https?:|mailto:|#)/i;
 
+// Longest ids first, so `a/b` wins over `a`. Cached per catalog array: a
+// markdown doc resolves every link against the same list.
+const sortedIds = new WeakMap<JsonEntry[], string[]>();
+function idsLongestFirst(entries: JsonEntry[]): string[] {
+  let ids = sortedIds.get(entries);
+  if (!ids) {
+    ids = entries.map((e) => e.id).sort((a, b) => b.length - a.length);
+    sortedIds.set(entries, ids);
+  }
+  return ids;
+}
+
 /**
  * Resolve a markdown link target, like the website's linkFor(): relative
  * paths resolve against the doc dir and route in-app when they land inside
@@ -330,8 +335,7 @@ export function mdLink(entries: JsonEntry[], entryId: string, file: string, u: s
   if (/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith('//')) return { kind: 'none' };
   const target = u.split('#')[0] ?? '';
   const matchEntry = (path: string): MdLink | null => {
-    const ids = entries.map((e) => e.id).sort((a, b) => b.length - a.length);
-    for (const id of ids) {
+    for (const id of idsLongestFirst(entries)) {
       if (path === id) return { kind: 'entry', id, file: null };
       if (path.startsWith(`${id}/`)) return { kind: 'entry', id, file: path.slice(id.length + 1) || null };
     }

@@ -27,7 +27,7 @@ html { overscroll-behavior: none; scroll-behavior: smooth; }
 ::-webkit-scrollbar-thumb { background: var(--dim); border: 4px solid var(--bg); border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); border-color: var(--bg); }
 ::-webkit-scrollbar-corner { background: transparent; }
-#topbar, #titlebar, .btn, .linklike, select,
+#topbar, #titlebar, .btn, .linklike,
 .row.pick, .onboard .prow, .chip { user-select: none; -webkit-user-select: none; }
 
 /* custom window chrome (OS frame is off) -------------------------------- */
@@ -72,15 +72,12 @@ html { overscroll-behavior: none; scroll-behavior: smooth; }
 .btn.danger { color: var(--fg); }
 .linklike { text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--dim); text-underline-offset: 4px; }
 
-input[type="text"], select {
+input[type="text"] {
   font: inherit; color: var(--fg); background: transparent;
   border: 0; border-bottom: 1px dotted var(--dim); border-radius: 0; padding: 0 0 1px;
 }
-input[type="text"]:focus, select:focus { outline: none; border-bottom-color: var(--accent); }
+input[type="text"]:focus { outline: none; border-bottom-color: var(--accent); }
 input[type="text"]::placeholder { color: var(--ghost); }
-select { border-bottom-color: transparent; }
-select option { background: #000; }
-#prompt select { flex: none; }
 
 /* rows that are picked, not linked ------------------------------------ */
 .row.pick { cursor: default; }
@@ -92,11 +89,7 @@ select option { background: #000; }
 .libgroup { margin-bottom: 16px; }
 .libhead { display: flex; align-items: baseline; gap: 0 1.5ch; margin: 0 0 4px; }
 .libhead .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.libhint { margin: 0 0 4px; }
-.libgroup .rows, .libgroup .libhint { padding-left: 2ch; }
-
-/* preset import detail in the project view ------------------------------- */
-.preset-imports { padding-left: 2ch; margin-bottom: 8px; }
+.libgroup .rows { padding-left: 2ch; }
 
 /* first-run onboarding: one question per screen ------------------------ */
 .onboard { max-width: 64ch; margin: 6vh auto 0; }
@@ -137,6 +130,7 @@ select option { background: #000; }
   color: var(--accent); max-width: 76ch; overflow-wrap: anywhere;
 }
 .conflict::before { content: "! "; }
+.opsec.conflict::before { content: none; }
 
 /* git-state markers on catalog rows -------------------------------------- */
 .markers { display: inline-flex; flex: none; gap: 0 1ch; }
@@ -149,6 +143,5 @@ select option { background: #000; }
   #topbar .switchers { gap: 0 1.5ch; }
   .statusrow .sub { padding-left: 0; }
   .statusrow .acts { margin-left: 0; }
-  .preset-imports { padding-left: 0; }
   input[type="text"] { max-width: 100%; }
 }
