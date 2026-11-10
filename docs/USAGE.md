@@ -136,9 +136,9 @@ The app looks for the checkout in this order:
 `pick stack folder` takes the folder that contains `tools/stack/cli.mjs`.
 `re-check` runs the checks again. A saved folder wins over `ESCACS_STACK`.
 
-The picked folder is saved before it is checked. An invalid pick therefore
-stays saved, and the app blocks on this screen again on the next launch.
-Pick the right folder to replace it. This screen has no `auto` button;
+A picked folder is checked before it is saved. An invalid pick is refused
+with the reason shown on this screen and is not remembered, so the app never
+blocks on a bad folder at the next launch. This screen has no `auto` button;
 `auto` in installed only appears once the app is usable.
 
 ### Top bar and footer
@@ -491,6 +491,7 @@ CLI's stderr, or its stdout if stderr is empty.
 |---|---|---|
 | `node was not found on PATH` | node is not installed, or not on the app's `PATH` | install Node.js 22+ from nodejs.org or a version manager, then relaunch |
 | `node 22+ is required, found vX` | node is too old | install a newer node, then relaunch |
+| `node --version printed nothing (exit N): …` | node starts but dies before printing a version. Typical cause: an AppImage that was relaunched from another instance (the updater, or starting it from inside the app) inherits the previous instance's `/tmp/.mount_*` library dirs, whose bundled `libffi` shadows the system one. The message carries node's first stderr line and which `node` was tried | the app drops AppImage mount entries from `LD_LIBRARY_PATH` up front. If node still prints nothing it retries once with the same entries also dropped from `LD_PRELOAD`, `LD_AUDIT` and `PATH` and the AppImage's own variables removed; your own entries stay. `re-check` and picking a folder probe node again. A persistent message means the `node` on `PATH` is broken itself: reinstall it, or fix the version-manager shim. Quitting every running instance and starting one fresh also clears an inherited mount |
 | setup screen shows only a node message (no folder named) | node fails while the checkout itself is fine | fix node, then `re-check`. The folder is not the problem |
 | `no escacs/stack checkout found` | no saved folder, no `ESCACS_STACK`, nothing found upward | `pick stack folder`, or export `ESCACS_STACK` and `re-check` |
 | `… is not a usable stack checkout: tools/stack/cli.mjs is missing` | the saved or env folder is not the clone | pick the folder that contains `tools/stack/cli.mjs` |

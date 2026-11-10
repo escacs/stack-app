@@ -17,7 +17,9 @@ use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::paths::{canonical_dir, confine_existing, join_inside};
@@ -413,11 +415,37 @@ pub struct NodeStatus {
     pub error: Option<String>,
 }
 
-/// `LD_LIBRARY_PATH` with `$APPDIR` entries removed, or `None` when nothing
-/// remains. Pure so tests can pin it without touching the process env.
-fn strip_appdir_lib_paths(libpath: &OsStr, appdir: &OsStr) -> Option<OsString> {
-    let kept: Vec<_> = std::env::split_paths(libpath)
-        .filter(|p| !p.starts_with(appdir))
+/// A directory the AppImage runtime may mount under.
+fn is_tmp_dir(d: &Path) -> bool {
+    d == Path::new("/tmp")
+        || d == Path::new("/var/tmp")
+        || d == std::env::temp_dir()
+        || d.starts_with("/run/user")
+}
+
+/// True for a path inside an AppImage mount. The runtime mounts a bundle at
+/// `<tmp>/.mount_<name><random>`, and a relaunch (the updater, or starting the
+/// app from another instance) inherits the PREVIOUS instance's mount in
+/// `PATH` and `LD_LIBRARY_PATH` as well, so this recognises any such mount,
+/// not only this run's `APPDIR`. A `.mount_*` directory elsewhere (say under
+/// the home folder) is the user's and is left alone.
+fn is_bundle_path(p: &Path, appdir: &OsStr) -> bool {
+    (!appdir.is_empty() && p.starts_with(appdir))
+        || p.ancestors().any(|a| {
+            a.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(".mount_"))
+                && a.parent().is_some_and(is_tmp_dir)
+        })
+}
+
+/// A path list with bundle entries removed (and, for library lists, empty
+/// entries: an empty library-path entry means the current directory), or
+/// `None` when nothing remains. Pure so tests can pin it without touching the
+/// process env.
+fn strip_entries(list: &OsStr, appdir: &OsStr, drop_empty: bool) -> Option<OsString> {
+    let kept: Vec<_> = std::env::split_paths(list)
+        .filter(|p| !(drop_empty && p.as_os_str().is_empty()) && !is_bundle_path(p, appdir))
         .collect();
     if kept.is_empty() {
         None
@@ -426,62 +454,158 @@ fn strip_appdir_lib_paths(libpath: &OsStr, appdir: &OsStr) -> Option<OsString> {
     }
 }
 
-/// Drop AppImage-bundled library dirs from a child command's env. The
-/// AppImage runtime prepends `$APPDIR/usr/lib...` to `LD_LIBRARY_PATH`, and
-/// a system `node` spawned with it dies in the loader (bundled libffi and
-/// friends shadow the system ones) with empty stdout — which used to
-/// surface as "could not parse the node version". Only `$APPDIR` entries
-/// go; user-set paths survive, and non-AppImage runs (no `$APPDIR`) keep
-/// their env untouched.
-fn unpoison_env(cmd: &mut Command) {
-    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
-    let libpath = std::env::var_os("LD_LIBRARY_PATH");
-    unpoison_env_with(cmd, &appdir, libpath.as_deref());
+/// Whether any entry of a path list lives in an AppImage mount.
+fn has_bundle_entry(list: &OsStr, appdir: &OsStr) -> bool {
+    std::env::split_paths(list).any(|p| is_bundle_path(&p, appdir))
 }
 
-fn unpoison_env_with(cmd: &mut Command, appdir: &OsStr, libpath: Option<&OsStr>) {
-    if appdir.is_empty() {
-        return;
-    }
-    let Some(libpath) = libpath else {
+/// Set once the plain probe printed nothing but a scrubbed environment worked:
+/// every later child (`stack_run`) then starts node the same way. Each probe
+/// that finishes with a working node replaces it (plain success clears it).
+static SCRUB_ENV: AtomicBool = AtomicBool::new(false);
+/// A successful probe, kept so each stack call does not pay a second node
+/// start. Failures are never cached (installing node while the app is open
+/// must work); user actions (boot, pick, re-check) re-probe with
+/// [`probe_node_fresh`].
+static NODE_OK: Mutex<Option<NodeStatus>> = Mutex::new(None);
+
+/// Variables that make a system `node` die in the loader when the app was
+/// started from a bundle (AppImage) or a launcher. Their bundle entries are
+/// stripped; the user's own entries stay (Nix, Guix and custom toolchains
+/// set these on purpose).
+const LOADER_VARS: &[&str] = &["LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT"];
+/// Variables the AppImage runtime adds; meaningless to a child node.
+const BUNDLE_VARS: &[&str] = &["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
+
+/// Rewrite one path-list variable of the child without its bundle entries.
+/// Untouched when it has none (a plain run keeps its env as it is). When
+/// nothing else remains the variable is dropped, except `PATH`, which is
+/// never deleted. `PATH` keeps its empty entries (they mean the current
+/// directory there); library lists lose them.
+fn strip_var(cmd: &mut Command, name: &str, value: Option<OsString>, appdir: &OsStr) {
+    let Some(val) = value else {
         return;
     };
-    match strip_appdir_lib_paths(libpath, appdir) {
+    if !has_bundle_entry(&val, appdir) {
+        return;
+    }
+    let is_path = name == "PATH";
+    match strip_entries(&val, appdir, !is_path) {
         Some(joined) => {
-            cmd.env("LD_LIBRARY_PATH", joined);
+            cmd.env(name, joined);
         }
-        None => {
-            cmd.env_remove("LD_LIBRARY_PATH");
+        None if !is_path => {
+            cmd.env_remove(name);
+        }
+        None => {}
+    }
+}
+
+/// One cleaning routine for every node child. `deep` is the retry level: it
+/// also cleans `LD_PRELOAD` and `LD_AUDIT` and removes the AppImage's own
+/// variables. The default level cleans `LD_LIBRARY_PATH` and `PATH`, the
+/// two a relaunched AppImage poisons. User entries always stay (Nix, Guix
+/// and custom toolchains set these on purpose), and a run with no bundle
+/// entries is left untouched. `get` reads the parent environment so tests
+/// can feed a fake one.
+fn clean_env_with(
+    cmd: &mut Command,
+    appdir: &OsStr,
+    get: impl Fn(&str) -> Option<OsString>,
+    deep: bool,
+) {
+    let loader: &[&str] = if deep { LOADER_VARS } else { &["LD_LIBRARY_PATH"] };
+    for v in loader.iter().chain(&["PATH"]) {
+        strip_var(cmd, v, get(v), appdir);
+    }
+    if deep {
+        for v in BUNDLE_VARS {
+            cmd.env_remove(v);
         }
     }
 }
 
-pub fn probe_node() -> NodeStatus {
+fn clean_env(cmd: &mut Command, deep: bool) {
+    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
+    clean_env_with(cmd, &appdir, |k| std::env::var_os(k), deep);
+}
+
+/// The environment for every stack child: default cleaning, or the retry
+/// level once a probe showed it is needed.
+fn unpoison_env(cmd: &mut Command) {
+    clean_env(cmd, SCRUB_ENV.load(Ordering::Relaxed));
+}
+
+/// First `node` on `PATH` outside any AppImage mount (the cleaned attempt
+/// never looks there), for the error text. Only looked up when a probe has
+/// failed.
+fn find_node_on_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
+    std::env::split_paths(&path)
+        .filter(|d| !is_bundle_path(d, &appdir))
+        .map(|d| d.join("node"))
+        .find(|p| is_executable_file(p))
+}
+
+#[cfg(unix)]
+fn is_executable_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(p: &Path) -> bool {
+    p.is_file()
+}
+
+/// One `node --version` probe at an explicit cleaning level, independent of
+/// the global decision (a fresh probe must not be masked by an earlier one).
+fn spawn_node_version(deep: bool) -> std::io::Result<Output> {
     let mut cmd = Command::new("node");
     cmd.arg("--version");
-    unpoison_env(&mut cmd);
-    let out = match cmd.output() {
-        Ok(o) => o,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return NodeStatus {
-                ok: false,
-                version: None,
-                major: None,
-                error: Some(
-                    "node was not found on PATH. Install Node.js 22 or newer (https://nodejs.org), then relaunch the app."
-                        .to_string(),
-                ),
-            };
-        }
-        Err(e) => {
-            return NodeStatus {
-                ok: false,
-                version: None,
-                major: None,
-                error: Some(format!("could not run node: {e}")),
-            };
-        }
+    clean_env(&mut cmd, deep);
+    cmd.output()
+}
+
+/// Why a probe that printed no parsable version failed, in one line a person
+/// can act on: what node printed, its exit status, its first stderr line and
+/// which binary was tried. Pure so tests can pin the wording.
+fn describe_unparsable(raw: &str, code: Option<i32>, stderr: &str, path: Option<&Path>) -> String {
+    let what = if raw.is_empty() {
+        "node --version printed nothing".to_string()
+    } else {
+        let head: String = raw.chars().take(60).collect();
+        let shown = if head.len() < raw.len() { format!("{head}…") } else { head };
+        format!("could not parse the node version ({shown:?})")
     };
+    let mut msg = what;
+    match code {
+        Some(c) if c != 0 => msg.push_str(&format!(" (exit {c})")),
+        None => msg.push_str(" (killed by a signal)"),
+        _ => {}
+    }
+    if let Some(line) = stderr.lines().map(str::trim).find(|l| !l.is_empty()) {
+        let line: String = line.chars().take(200).collect();
+        msg.push_str(&format!(": {line}"));
+    }
+    if let Some(p) = path {
+        msg.push_str(&format!(" [node: {}]", p.display()));
+    }
+    msg.push_str("; need node 22+");
+    msg
+}
+
+fn node_failed(error: String, version: Option<String>, major: Option<u32>) -> NodeStatus {
+    NodeStatus {
+        ok: false,
+        version,
+        major,
+        error: Some(error),
+    }
+}
+
+fn node_status_from(out: &Output, path: Option<&Path>) -> NodeStatus {
     let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let major = raw
         .strip_prefix('v')
@@ -498,36 +622,120 @@ pub fn probe_node() -> NodeStatus {
             major: Some(m),
             error: None,
         },
-        Some(m) => NodeStatus {
-            ok: false,
-            version: Some(raw.clone()),
-            major: Some(m),
-            error: Some(format!(
+        Some(m) => node_failed(
+            format!(
                 "node 22+ is required, found {raw}. Install a newer Node.js (https://nodejs.org), then relaunch the app."
-            )),
-        },
-        None => {
-            let head: String = raw.chars().take(60).collect();
-            let shown = if head.len() < raw.len() {
-                format!("{head}…")
-            } else {
-                head
-            };
-            NodeStatus {
-                ok: false,
-                version: Some(raw),
-                major: None,
-                error: Some(format!(
-                    "could not parse the node version ({shown:?}); need node 22+"
-                )),
+            ),
+            Some(raw),
+            Some(m),
+        ),
+        None => node_failed(
+            describe_unparsable(
+                &raw,
+                out.status.code(),
+                &String::from_utf8_lossy(&out.stderr),
+                path,
+            ),
+            Some(raw),
+            None,
+        ),
+    }
+}
+
+fn not_found_status() -> NodeStatus {
+    node_failed(
+        "node was not found on PATH. Install Node.js 22 or newer (https://nodejs.org), then relaunch the app."
+            .to_string(),
+        None,
+        None,
+    )
+}
+
+fn remember(status: &NodeStatus) {
+    if let Ok(mut g) = NODE_OK.lock() {
+        *g = Some(status.clone());
+    }
+}
+
+/// Probe node, answering from the cache after a success. Used by every stack
+/// call; user actions use [`probe_node_fresh`].
+pub fn probe_node() -> NodeStatus {
+    if let Some(hit) = NODE_OK.lock().ok().and_then(|g| g.clone()) {
+        return hit;
+    }
+    probe_uncached()
+}
+
+/// Probe node again from scratch: forget the cached success, so a node that
+/// was fixed, broken or switched is noticed.
+pub fn probe_node_fresh() -> NodeStatus {
+    // The scrub decision is replaced only when this probe has a result, so a
+    // stack call in flight keeps the environment it started with.
+    if let Ok(mut g) = NODE_OK.lock() {
+        *g = None;
+    }
+    probe_uncached()
+}
+
+fn probe_uncached() -> NodeStatus {
+    let first = spawn_node_version(false);
+    let status = match &first {
+        Ok(out) => node_status_from(out, None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return not_found_status(),
+        Err(e) => node_failed(format!("could not run node: {e}"), None, None),
+    };
+    if status.ok {
+        SCRUB_ENV.store(false, Ordering::Relaxed);
+        remember(&status);
+        return status;
+    }
+    // A loader crash prints nothing or exits non-zero; a wrapper that prints
+    // a banner or a too-old version is not helped by a clean environment.
+    let retryable = match &first {
+        Ok(out) => {
+            status.major.is_none()
+                && (out.stdout.iter().all(u8::is_ascii_whitespace) || !out.status.success())
+        }
+        Err(_) => true,
+    };
+    let base = status.error.clone();
+    let mut failure = match &first {
+        Ok(out) if status.major.is_none() => node_status_from(out, find_node_on_path().as_deref()),
+        _ => status,
+    };
+    if !retryable {
+        return failure;
+    }
+    // Retry once with the loader and bundle variables stripped. If that
+    // works, every later child starts that way.
+    match spawn_node_version(true) {
+        Ok(out2) => {
+            let second = node_status_from(&out2, None);
+            if second.ok {
+                SCRUB_ENV.store(true, Ordering::Relaxed);
+                remember(&second);
+                return second;
+            }
+            // Say what the retry hit only when it differs from the first
+            // failure (`base` is the first message without its node path).
+            if let (Some(a), Some(b)) = (failure.error.as_mut(), second.error.as_ref()) {
+                if Some(b) != base.as_ref() {
+                    a.push_str(&format!(" | clean-environment retry: {b}"));
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(a) = failure.error.as_mut() {
+                a.push_str(&format!(" | clean-environment retry could not run node: {e}"));
             }
         }
     }
+    failure
 }
 
 #[tauri::command]
 pub fn node_status() -> NodeStatus {
-    probe_node()
+    probe_node_fresh()
 }
 
 #[derive(Debug, Serialize)]
@@ -690,7 +898,7 @@ pub fn stack_location(stack_dir: Option<String>) -> StackLocation {
 /// yields `valid: false` with exactly one actionable `error`.
 #[tauri::command]
 pub fn validate_stack(stack_dir: Option<String>) -> StackReport {
-    let node = probe_node();
+    let node = probe_node_fresh();
     let (path, source) = match resolve_stack_dir(stack_dir.as_deref()) {
         Ok((p, s)) => (p, s.to_string()),
         Err(e) => {
@@ -767,7 +975,17 @@ pub fn run_stack(
         cmd.arg("--").args(&argv.positionals);
     }
     cmd.current_dir(&project);
-    let (code, out, err) = run_with_timeout(&mut cmd, timeout_for(subcommand), subcommand)?;
+    let (code, out, err) = match run_with_timeout(&mut cmd, timeout_for(subcommand), subcommand) {
+        Ok(r) => r,
+        Err(e) => {
+            // The cached "node works" may be stale (removed or switched while
+            // the app was open): the next call probes again.
+            if let Ok(mut g) = NODE_OK.lock() {
+                *g = None;
+            }
+            return Err(e);
+        }
+    };
     let (stdout, t1) = truncate(&String::from_utf8_lossy(&out.bytes));
     let (stderr, t2) = truncate(&String::from_utf8_lossy(&err.bytes));
     Ok(StackRunOutput {
@@ -1234,6 +1452,112 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
     }
 
+    fn sh_out(script: &str) -> Output {
+        Command::new("sh").args(["-c", script]).output().expect("sh runs")
+    }
+
+    #[test]
+    fn empty_node_output_names_exit_stderr_and_binary() {
+        let msg = describe_unparsable(
+            "",
+            Some(127),
+            "\n  node: error while loading shared libraries: libfoo.so\nsecond line",
+            Some(Path::new("/opt/node/bin/node")),
+        );
+        assert!(msg.starts_with("node --version printed nothing (exit 127): node: error while loading"));
+        assert!(msg.contains("[node: /opt/node/bin/node]"));
+        assert!(msg.ends_with("need node 22+"));
+        assert!(!msg.contains("second line"));
+        // Garbled output keeps the old wording, quoted and capped.
+        let msg = describe_unparsable("hello", Some(0), "", None);
+        assert_eq!(msg, "could not parse the node version (\"hello\"); need node 22+");
+    }
+
+    #[test]
+    fn node_status_from_reads_real_child_output() {
+        let ok = node_status_from(&sh_out("printf v22.3.0"), None);
+        assert!(ok.ok && ok.major == Some(22));
+        let old = node_status_from(&sh_out("printf v20.1.0"), None);
+        assert!(!old.ok && old.major == Some(20));
+        assert!(old.error.unwrap().contains("node 22+ is required, found v20.1.0"));
+        let dead = node_status_from(&sh_out("echo boom >&2; exit 3"), None);
+        assert!(!dead.ok && dead.major.is_none());
+        let err = dead.error.unwrap();
+        assert!(err.contains("printed nothing") && err.contains("(exit 3)") && err.contains("boom"));
+    }
+
+    fn env_of(cmd: &Command) -> std::collections::HashMap<String, Option<String>> {
+        cmd.get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn deep_clean_strips_bundle_entries_but_keeps_the_users() {
+        let fake = |k: &str| -> Option<OsString> {
+            match k {
+                "LD_LIBRARY_PATH" => Some("/tmp/.mount_a/usr/lib:/opt/nix/lib".into()),
+                "LD_PRELOAD" => Some("/tmp/.mount_a/usr/lib/shim.so".into()),
+                "LD_AUDIT" => Some("/opt/audit.so".into()),
+                "PATH" => Some("/tmp/.mount_b/usr/bin:/usr/bin::/opt/x".into()),
+                _ => None,
+            }
+        };
+        let mut cmd = Command::new("node");
+        clean_env_with(&mut cmd, OsStr::new("/tmp/.mount_a"), fake, true);
+        let envs = env_of(&cmd);
+        // User entries survive; bundle entries go; a clean var is untouched.
+        assert_eq!(envs["LD_LIBRARY_PATH"].as_deref(), Some("/opt/nix/lib"));
+        assert_eq!(envs["LD_PRELOAD"], None);
+        assert!(!envs.contains_key("LD_AUDIT"));
+        // PATH keeps its empty entry (the current directory) and the rest.
+        assert_eq!(envs["PATH"].as_deref(), Some("/usr/bin::/opt/x"));
+        for v in ["APPDIR", "APPIMAGE", "ARGV0", "OWD"] {
+            assert_eq!(envs[v], None, "{v} not removed");
+        }
+    }
+
+    #[test]
+    fn default_clean_leaves_preload_and_the_appimage_vars_alone() {
+        let fake = |k: &str| -> Option<OsString> {
+            match k {
+                "LD_LIBRARY_PATH" => Some("/tmp/.mount_a/usr/lib".into()),
+                "LD_PRELOAD" => Some("/tmp/.mount_a/usr/lib/shim.so".into()),
+                "PATH" => Some("/tmp/.mount_a/usr/bin".into()),
+                _ => None,
+            }
+        };
+        let mut cmd = Command::new("node");
+        clean_env_with(&mut cmd, OsStr::new("/tmp/.mount_a"), fake, false);
+        let envs = env_of(&cmd);
+        assert_eq!(envs["LD_LIBRARY_PATH"], None);
+        assert!(!envs.contains_key("LD_PRELOAD"));
+        assert!(!envs.contains_key("APPDIR"));
+        // PATH is never deleted, even when only bundle entries were in it.
+        assert!(!envs.contains_key("PATH"));
+    }
+
+    #[test]
+    fn only_tmp_mounts_count_as_bundles() {
+        let none = OsStr::new("");
+        assert!(is_bundle_path(Path::new("/tmp/.mount_stack-x/usr/lib"), none));
+        assert!(is_bundle_path(Path::new("/var/tmp/.mount_stack-x/usr/lib"), none));
+        assert!(is_bundle_path(Path::new("/run/user/1000/.mount_stack-x/usr/lib"), none));
+        // A user's own `.mount_*` directory is not an AppImage mount (unless
+        // the machine's TMPDIR points there, which this test cannot assume).
+        if std::env::temp_dir() != Path::new("/home/me") {
+            assert!(!is_bundle_path(Path::new("/home/me/.mount_data/lib"), none));
+        }
+        assert!(!is_bundle_path(Path::new("/opt/mine/lib"), none));
+        // The current APPDIR always counts.
+        assert!(is_bundle_path(Path::new("/opt/odd/dir/usr/lib"), OsStr::new("/opt/odd/dir")));
+    }
+
     #[test]
     fn node_only_failure_does_not_blame_the_checkout() {
         let p = proj("nodeonly");
@@ -1254,7 +1578,7 @@ mod tests {
         let lib =
             OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/opt/mine/lib:/tmp/.mount_StackAbC123/lib");
         assert_eq!(
-            strip_appdir_lib_paths(lib, appdir).as_deref(),
+            strip_entries(lib, appdir, true).as_deref(),
             Some(OsStr::new("/opt/mine/lib"))
         );
     }
@@ -1263,37 +1587,59 @@ mod tests {
     fn strip_appdir_lib_paths_none_when_all_bundled() {
         let appdir = OsStr::new("/tmp/.mount_StackAbC123");
         let lib = OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/tmp/.mount_StackAbC123/lib");
-        assert_eq!(strip_appdir_lib_paths(lib, appdir), None);
+        assert_eq!(strip_entries(lib, appdir, true), None);
     }
 
     #[test]
-    fn unpoison_env_with_sets_or_removes() {
-        let appdir = OsStr::new("/tmp/.mount_StackAbC123");
+    fn a_relaunched_app_loses_the_previous_instances_mount_too() {
+        // Shape captured from a real relaunched AppImage: its own mount plus
+        // the previous instance's, a user entry, and a trailing empty entry.
+        let appdir = OsStr::new("/tmp/.mount_stack-oFGfeC");
+        let lib = OsStr::new(
+            "/tmp/.mount_stack-oFGfeC/usr/lib/:/tmp/.mount_stack-djHcmD/usr/lib/:/opt/mine/lib:",
+        );
+        assert_eq!(
+            strip_entries(lib, appdir, true).as_deref(),
+            Some(OsStr::new("/opt/mine/lib"))
+        );
+        // The old mount alone is enough to poison, even without APPDIR.
         let mut cmd = Command::new("node");
-        unpoison_env_with(
+        let get = |k: &str| -> Option<OsString> {
+            (k == "LD_LIBRARY_PATH").then(|| "/tmp/.mount_stack-djHcmD/usr/lib/".into())
+        };
+        clean_env_with(&mut cmd, OsStr::new(""), get, false);
+        assert_eq!(env_of(&cmd)["LD_LIBRARY_PATH"], None);
+        // A user library dir under /tmp that is not a mount survives.
+        let kept = strip_entries(OsStr::new("/tmp/mylibs:/tmp/.mount_x/usr/lib"), OsStr::new(""), true);
+        assert_eq!(kept.as_deref(), Some(OsStr::new("/tmp/mylibs")));
+    }
+
+    #[test]
+    fn clean_env_sets_removes_or_leaves_the_library_path() {
+        let appdir = OsStr::new("/tmp/.mount_StackAbC123");
+        let with = |lib: &'static str| move |k: &str| -> Option<OsString> {
+            (k == "LD_LIBRARY_PATH").then(|| lib.into())
+        };
+        let mut cmd = Command::new("node");
+        clean_env_with(
             &mut cmd,
             appdir,
-            Some(OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/opt/mine/lib")),
+            with("/tmp/.mount_StackAbC123/usr/lib:/opt/mine/lib"),
+            false,
         );
-        let envs: Vec<_> = cmd.get_envs().collect();
+        let envs = env_of(&cmd);
         assert_eq!(envs.len(), 1);
-        assert_eq!(envs[0].0, OsStr::new("LD_LIBRARY_PATH"));
-        assert_eq!(envs[0].1, Some(OsStr::new("/opt/mine/lib")));
+        assert_eq!(envs["LD_LIBRARY_PATH"].as_deref(), Some("/opt/mine/lib"));
 
         let mut bare = Command::new("node");
-        unpoison_env_with(
-            &mut bare,
-            appdir,
-            Some(OsStr::new("/tmp/.mount_StackAbC123/usr/lib")),
-        );
-        let envs: Vec<_> = bare.get_envs().collect();
+        clean_env_with(&mut bare, appdir, with("/tmp/.mount_StackAbC123/usr/lib"), false);
+        let envs = env_of(&bare);
         assert_eq!(envs.len(), 1);
-        assert_eq!(envs[0].0, OsStr::new("LD_LIBRARY_PATH"));
-        assert_eq!(envs[0].1, None);
+        assert_eq!(envs["LD_LIBRARY_PATH"], None);
 
         // No APPDIR (dev runs, deb/rpm installs): env untouched.
         let mut plain = Command::new("node");
-        unpoison_env_with(&mut plain, OsStr::new(""), Some(OsStr::new("/opt/mine/lib")));
+        clean_env_with(&mut plain, OsStr::new(""), with("/opt/mine/lib"), false);
         assert_eq!(plain.get_envs().count(), 0);
     }
 }
