@@ -1,5 +1,5 @@
 // Custom window chrome: the OS frame is off (decorations: false), so this
-// bar owns dragging plus mono minimize / maximize / close. Always rendered
+// bar owns dragging (Tauri's drag region) plus mono minimize / maximize / close. Always rendered
 // (even during onboarding — a frameless window needs its close button).
 // Under the mock bridge the window calls resolve to no-ops.
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -19,18 +19,12 @@ export default function TitleBar() {
       if (w) void fn(w).catch(() => {});
     };
 
-  // A double-click on a window button must not also maximize.
-  const onDbl = (e: MouseEvent) => {
-    if ((e.target as Element).closest('button')) return;
-    act((w) => w.toggleMaximize())();
-  };
-
+  // Dragging and double-click-to-maximize are Tauri's own: its injected script
+  // handles `data-tauri-drag-region` (start_dragging, internal_toggle_maximize),
+  // which needs `core:window:allow-start-dragging` in capabilities/default.json.
+  // No dblclick handler here: it would toggle a second time and undo it.
   return (
-    <header
-      id="titlebar"
-      data-tauri-drag-region
-      onDblClick={onDbl}
-    >
+    <header id="titlebar" data-tauri-drag-region>
       <span class="tbrand" data-tauri-drag-region>
         stack
       </span>

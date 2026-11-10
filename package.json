@@ -1,6 +1,6 @@
 {
   "name": "@escacs/stack-app",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "escacs stack desktop client (Tauri 2 + SolidJS + Vite). Works against an escacs/stack checkout.",
   "type": "module",

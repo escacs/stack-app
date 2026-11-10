@@ -94,6 +94,21 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// The frameless titlebar needs these grants or its drag and buttons are
+    /// silently denied (`core:window:default` has none of them).
+    #[test]
+    fn capabilities_grant_the_window_chrome_permissions() {
+        let caps = include_str!("../capabilities/default.json");
+        for perm in [
+            "core:window:allow-start-dragging",
+            "core:window:allow-minimize",
+            "core:window:allow-toggle-maximize",
+            "core:window:allow-close",
+        ] {
+            assert!(caps.contains(&format!("\"{perm}\"")), "missing {perm}");
+        }
+    }
+
     use super::*;
 
     #[test]
