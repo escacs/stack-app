@@ -13,6 +13,7 @@ pub mod scan;
 pub mod stack;
 
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// Native folder picker. Runs on a blocking thread so the webview stays
 /// responsive while the dialog is open. Returns `None` on cancel.
@@ -32,6 +33,20 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            // Silent, non-blocking update check at startup. The result is
+            // deliberately ignored here; the settings view offers a manual
+            // check plus download/install/relaunch with progress.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(updater) = handle.updater() {
+                    let _ = updater.check().await;
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pick_folder,
             config::get_config,

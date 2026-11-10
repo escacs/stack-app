@@ -15,9 +15,9 @@ on first run).
 - Rust stable (`cargo --version`)
 - An escacs/stack checkout (private repo; this app never bundles it)
 - Linux webview deps (names as pkg-config sees them): `webkit2gtk-4.1`,
-  `librsvg-2.0`, plus `patchelf` for bundling. On Debian/Ubuntu:
-  `libwebkit2gtk-4.1-dev librsvg2-dev patchelf`
-  (`libayatana-appindicator3-dev` only if a tray icon is added later).
+  `librsvg-2.0`, plus `patchelf` for bundling. Per-distro install lines
+  (Debian/Ubuntu, Fedora, Arch) are in
+  [docs/INSTALL.md](docs/INSTALL.md#prerequisites).
 
 ## Run
 
@@ -34,6 +34,10 @@ from here).
 On first run the app asks for the stack checkout (folder picker, remembered
 in settings). It also honours the `ESCACS_STACK` env var — the same
 convention as the stack repo's own setup docs.
+
+Packaging, releases and platform notes live in
+[docs/INSTALL.md](docs/INSTALL.md), [docs/UPDATES.md](docs/UPDATES.md) and
+[docs/PORTABILITY.md](docs/PORTABILITY.md).
 
 ## Tests
 

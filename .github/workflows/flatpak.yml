@@ -1,0 +1,55 @@
+# SKETCH — builds the Flatpak once the generated vendor sources exist.
+# Today it fails early with a pointer to flatpak/README.md. This is
+# intentional: a red build that says exactly what to generate beats a
+# silently-skipped one.
+name: flatpak
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'flatpak/**'
+      - '.github/workflows/flatpak.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: check generated vendor sources exist
+        run: |
+          missing=0
+          for f in flatpak/npm-sources.json flatpak/cargo-sources.json; do
+            if [ ! -f "$f" ]; then echo "::error file=$f::missing — see flatpak/README.md"; missing=1; fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.gnome.Platform//51 org.gnome.Sdk//51
+
+      - name: build
+        # --install-deps-from resolves the manifest's sdk-extensions
+        # (node24, rust-stable) against the SDK base itself, so no branch
+        # pins are needed here. --user keeps the dep install (and the
+        # flathub remote above) in the per-user installation: no sudo.
+        run: |
+          flatpak-builder --sandbox --user --force-clean --repo=repo \
+            --install-deps-from=flathub \
+            build-dir flatpak/codes.escacs.stack.yml
+
+      - name: bundle
+        run: |
+          flatpak build-bundle repo stack-app.flatpak codes.escacs.stack --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: stack-app-flatpak
+          path: stack-app.flatpak

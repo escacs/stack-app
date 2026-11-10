@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>codes.escacs.stack</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Stack</name>
+  <summary>Desktop shell for the escacs stack library</summary>
+  <description>
+    <p>
+      Stack is a desktop client for the escacs/stack library: browse entries,
+      import them into projects, and track upstream status. It shells out to
+      the stack checkout's own CLI and never reimplements the import logic.
+    </p>
+  </description>
+  <launchable type="desktop-id">codes.escacs.stack.desktop</launchable>
+  <provides>
+    <binary>stack-app</binary>
+  </provides>
+  <categories>
+    <category>Utility</category>
+  </categories>
+</component>

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Stack
+Comment=escacs stack desktop shell (Tauri 2)
+Exec=stack-app
+Icon=codes.escacs.stack
+StartupWMClass=stack-app
+Terminal=false
+Categories=Utility;

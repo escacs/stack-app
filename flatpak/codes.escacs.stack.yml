@@ -1,0 +1,84 @@
+# DRAFT — not yet buildable. See flatpak/README.md for what is missing
+# (generated npm/cargo vendor sources) and why.
+#
+# Local build once the generated sources exist:
+#   flatpak-builder --force-clean build-dir flatpak/codes.escacs.stack.yml
+#   flatpak-builder --run build-dir flatpak/codes.escacs.stack.yml stack-app
+app-id: codes.escacs.stack
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  # Build-time node+npm and the Rust toolchain. Unpinned freedesktop
+  # extensions under a GNOME SDK are the norm (e.g. Fractal and Pika
+  # Backup ship exactly this form); flatpak-builder resolves the branch
+  # against the SDK base. If the first build ever reports an extension
+  # missing, pin with //branch (both extensions exist on flathub at
+  # //25.08 and //26.08).
+  - org.freedesktop.Sdk.Extension.node24
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: stack-app
+finish-args:
+  # WebKitGTK requirements.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The stack CLI's update commands and the in-app updater fetch over the
+  # network; everything else runs locally.
+  - --share=network
+  # Projects plus the ~/escacs/stack checkout live under home. The folder
+  # picker goes through the file-chooser portal, so folders outside home
+  # still open with per-folder grants (see flatpak/README.md).
+  - --filesystem=home
+modules:
+  # Runtime node: the app shells out to `node <stack>/tools/stack/cli.mjs`
+  # and probes it on PATH, so the sandbox must ship node, not just npm.
+  # install.sh (node binary only, lands at /app/node/bin/node) is enough;
+  # install-sdk.sh would copy the whole SDK into /app. Both script names
+  # verified against the extension source
+  # (flathub/org.freedesktop.Sdk.Extension.node24).
+  - name: node
+    buildsystem: simple
+    build-commands:
+      - /usr/lib/sdk/node24/install.sh
+      - ln -sf ../node/bin/node /app/bin/node
+    # No sources: installs from the node24 SDK extension.
+
+  - name: stack-app
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin
+      env:
+        # Offline npm: the generated npm sources land in this cache layout.
+        XDG_CACHE_HOME: /run/build/stack-app/flatpak-node/cache
+        npm_config_cache: /run/build/stack-app/flatpak-node/npm-cache
+        # Offline cargo: crates come from the generated cargo sources.
+        CARGO_HOME: /run/build/stack-app/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      # Frontend (offline: deps from npm-sources.json).
+      - npm ci --offline
+      - npm run build
+      # Backend (offline: crates from cargo-sources.json). Tauri bundling is
+      # skipped: flatpak owns the desktop file and icons.
+      - cargo --offline fetch --manifest-path src-tauri/Cargo.toml
+      - cargo build --offline --release --manifest-path src-tauri/Cargo.toml
+      - install -Dm0755 src-tauri/target/release/stack-app /app/bin/stack-app
+      - install -Dm0644 flatpak/codes.escacs.stack.desktop /app/share/applications/codes.escacs.stack.desktop
+      - install -Dm0644 flatpak/codes.escacs.stack.metainfo.xml /app/share/metainfo/codes.escacs.stack.metainfo.xml
+      # Icons from the repo's Tauri set (32/64/128/256/512), renamed to the id.
+      - install -Dm0644 src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/codes.escacs.stack.png
+      - install -Dm0644 src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/codes.escacs.stack.png
+      - install -Dm0644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/codes.escacs.stack.png
+      - install -Dm0644 src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/codes.escacs.stack.png
+      - install -Dm0644 src-tauri/icons/icon.png /app/share/icons/hicolor/512x512/apps/codes.escacs.stack.png
+    sources:
+      # Whole-repo checkout. Works for local and CI builds; a flathub
+      # submission would switch this to a git source (impossible while the
+      # repo is private — see flatpak/README.md).
+      - type: dir
+        path: ../
+      # Generated, NOT yet committed (see flatpak/README.md):
+      # - npm-sources.json      # flatpak-node-generator npm package-lock.json
+      # - cargo-sources.json    # flatpak-cargo-generator.py src-tauri/Cargo.lock

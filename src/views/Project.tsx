@@ -19,6 +19,13 @@ import {
   saveScanRoots,
   stack,
 } from '../store';
+import {
+  checkForUpdate,
+  downloadAndInstallUpdate,
+  relaunchApp,
+  type Update,
+  type UpdateProgress,
+} from '../updater';
 
 export default function Project() {
   const [scanRoot, setScanRootState] = createSignal(config()?.scanRoot ?? '');
@@ -237,6 +244,112 @@ export default function Project() {
             <p class="dimtxt">the override is the escacs/stack clone (the folder containing tools/stack/cli.mjs).</p>
           </div>
         )}
+      </Show>
+
+      <UpdateSection />
+    </div>
+  );
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Manual update check / download / install / relaunch against the GitHub
+// releases page. Errors surface verbatim; the silent startup check runs
+// Rust-side in src-tauri/src/lib.rs.
+function UpdateSection() {
+  const [checking, setChecking] = createSignal(false);
+  const [installing, setInstalling] = createSignal(false);
+  const [status, setStatus] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const [update, setUpdate] = createSignal<Update | null>(null);
+  const [progress, setProgress] = createSignal<UpdateProgress | null>(null);
+  const [installed, setInstalled] = createSignal(false);
+
+  async function checkNow() {
+    setChecking(true);
+    setError(null);
+    setStatus(null);
+    setProgress(null);
+    setInstalled(false);
+    try {
+      const u = await checkForUpdate();
+      setUpdate(u);
+      setStatus(u ? `update available: ${u.currentVersion} → ${u.version}` : 'up to date');
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function installNow() {
+    const u = update();
+    if (!u) return;
+    setInstalling(true);
+    setError(null);
+    try {
+      await downloadAndInstallUpdate(u, (p) => setProgress({ ...p }));
+      setInstalled(true);
+      setStatus(`installed ${u.version} — relaunch to run it`);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setInstalling(false);
+    }
+  }
+
+  async function relaunchNow() {
+    setError(null);
+    try {
+      await relaunchApp();
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
+  const progressText = () => {
+    const p = progress();
+    if (!p) return null;
+    if (p.done) return `downloaded ${fmtBytes(p.downloaded)}`;
+    if (p.total) {
+      const pct = Math.round((p.downloaded / p.total) * 100);
+      return `${fmtBytes(p.downloaded)} / ${fmtBytes(p.total)} (${pct}%)`;
+    }
+    return `${fmtBytes(p.downloaded)}…`;
+  };
+
+  return (
+    <div>
+      <h2>updates</h2>
+      <p class="dimtxt">checks the github releases page for a newer build.</p>
+      <p>
+        <button class="btn" disabled={checking() || installing()} onClick={() => void checkNow()}>
+          {checking() ? 'checking' : 'check for updates'}
+        </button>{' '}
+        <Show when={update() && !installed()}>
+          <button class="btn" disabled={checking() || installing()} onClick={() => void installNow()}>
+            {installing() ? 'installing' : `download & install ${update()?.version}`}
+          </button>{' '}
+        </Show>
+        <Show when={installed()}>
+          <button class="btn" onClick={() => void relaunchNow()}>relaunch</button>
+        </Show>
+      </p>
+      <Show when={status()}>
+        <p class="dimtxt">{status()}</p>
+      </Show>
+      <Show when={update()?.body}>
+        <p class="dimtxt">{update()?.body}</p>
+      </Show>
+      <Show when={progressText()}>
+        <p class="dimtxt">{progressText()}</p>
+      </Show>
+      <Show when={error()}>
+        <p class="conflict" role="alert">{error()}</p>
       </Show>
     </div>
   );

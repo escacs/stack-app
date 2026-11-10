@@ -1,0 +1,48 @@
+name: release
+
+# Cut a release by bumping `version` in package.json, src-tauri/tauri.conf.json
+# and src-tauri/Cargo.toml to the same number, then pushing a matching tag:
+#   git tag v0.2.0 && git push origin v0.2.0
+# See docs/UPDATES.md. Needs the TAURI_SIGNING_PRIVATE_KEY repo secret.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Linux only, on the oldest supported runner image so the bundles keep
+    # working on older glibc (same reason distro builds lag the toolchain).
+    # Do NOT bump this to a newer ubuntu without a portability review:
+    # the glibc here is the minimum the bundles will run on.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install webview deps
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y
+          libwebkit2gtk-4.1-dev build-essential curl wget file
+          libxdo-dev libssl-dev libayatana-appindicator3-dev
+          librsvg2-dev patchelf
+      # Builds the deb/rpm/appimage bundles plus the updater artifacts
+      # (.sig files and latest.json) and creates the GitHub release with
+      # everything attached. The app polls latest.json for updates.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Stack ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: false
+          prerelease: false
