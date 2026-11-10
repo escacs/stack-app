@@ -52,6 +52,10 @@ export const [appUpdate, setAppUpdate] = createSignal<string | null>(null);
 // First-run onboarding: set when the user continues past "who" without a
 // worker (empty stack or failed list). Session-only.
 export const [workerSkipped, setWorkerSkipped] = createSignal(false);
+// Session-only: each launch asks who, then which project, even when both
+// are remembered (the remembered ones are just preselected).
+export const [whoDone, setWhoDone] = createSignal(false);
+export const [projectDone, setProjectDone] = createSignal(false);
 // Last failed user action (a save, a bad project path, a stack re-check).
 // Rendered once by App as a conflict line; cleared by the next action.
 export const [actionError, setActionError] = createSignal<string | null>(null);
@@ -84,7 +88,8 @@ async function guard<T>(label: string, fn: () => Promise<T>): Promise<T> {
  */
 async function persist(label: string, next: AppConfig): Promise<string | null> {
   try {
-    await guard(label, () => saveConfig(next));
+    // The user and the project are asked every launch, never remembered.
+    await guard(label, () => saveConfig({ ...next, worker: null, project: null }));
     return null;
   } catch (err) {
     return errText(err);
@@ -127,6 +132,12 @@ export async function boot(): Promise<void> {
     const c = await getConfig();
     // Older configs predate scanRoots; normalize so views can rely on it.
     if (!Array.isArray(c.scanRoots)) c.scanRoots = [];
+    // Nothing is remembered: an older config's user and project are dropped.
+    if (c.worker || c.project) {
+      c.worker = null;
+      c.project = null;
+      void persist('config', c);
+    }
     // Stack, report and workers land before the config: the shell gates on
     // config, so it must never render against a half-loaded state.
     const s = await validateStack(c.stackPath);
@@ -278,12 +289,23 @@ export async function chooseWorker(name: string | null): Promise<void> {
     setActionError(err);
     return;
   }
+  // A new answer to who always re-asks the project.
+  setWhoDone(name !== null);
+  setProjectDone(false);
   setConfig(next);
+}
+
+/** Continue past who without a user (empty stack or failed list). */
+export function skipWorker(): void {
+  setWorkerSkipped(true);
+  setWhoDone(true);
+  setProjectDone(false);
 }
 
 /** Back to the who screen: forget the user, even a skipped one. */
 export async function switchWorker(): Promise<void> {
   setWorkerSkipped(false);
+  setWhoDone(false);
   await chooseWorker(null);
 }
 
@@ -305,6 +327,7 @@ export async function chooseProject(path: string | null): Promise<void> {
     }
     setReport(null);
     setLock(emptyLock());
+    setProjectDone(false);
     setConfig(next);
     return;
   }
@@ -323,6 +346,7 @@ export async function chooseProject(path: string | null): Promise<void> {
   const cfg = await addRecentProject(path).catch(() => next);
   setReport(rep);
   setLock(emptyLock());
+  setProjectDone(true);
   setConfig({ ...cfg, project: path });
   await refreshLock();
 }

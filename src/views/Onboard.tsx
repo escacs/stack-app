@@ -9,7 +9,7 @@ import {
   chooseWorker,
   config,
   refreshWorkers,
-  setWorkerSkipped,
+  skipWorker,
   switchWorker,
   workerName,
   workers,
@@ -43,7 +43,11 @@ function Shell(props: { children: unknown }) {
  * has rows, so focusing on mount covers rows that load late. Keys act only
  * when the list itself is focused, never a button beside it.
  */
-function PickList(props: { label: string; items: () => string[]; pick: (i: number) => void }) {
+function PickList(props: {
+  label: string;
+  items: () => string[];
+  pick: (i: number) => void;
+}) {
   const [sel, setSel] = createSignal(0);
   const onKey = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return;
@@ -113,7 +117,7 @@ export function WhoScreen() {
             <button class="btn" ref={focusSoon} onClick={() => void refreshWorkers()}>
               retry
             </button>{' '}
-            <button class="linklike" onClick={() => setWorkerSkipped(true)}>
+            <button class="linklike" onClick={() => skipWorker()}>
               continue without one
             </button>
           </p>
@@ -121,7 +125,7 @@ export function WhoScreen() {
         <Match when={names().length === 0}>
           <p class="empty">(._.) none</p>
           <p>
-            <button class="btn" ref={focusSoon} onClick={() => setWorkerSkipped(true)}>
+            <button class="btn" ref={focusSoon} onClick={() => skipWorker()}>
               continue without one
             </button>
           </p>

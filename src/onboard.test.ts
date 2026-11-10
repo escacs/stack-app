@@ -18,6 +18,18 @@ describe('onboardStep', () => {
   });
 });
 
+describe('onboardStep per launch', () => {
+  it('asks again each launch even when both are remembered', () => {
+    expect(onboardStep('mel', '/p', false, false, false)).toBe('who');
+    expect(onboardStep('mel', '/p', false, true, false)).toBe('project');
+    expect(onboardStep('mel', '/p', false, true, true)).toBe(null);
+  });
+
+  it('a skipped worker still asks the project', () => {
+    expect(onboardStep(null, '/p', true, true, false)).toBe('project');
+  });
+});
+
 describe('moveSel', () => {
   it('walks the rows and stops at the ends', () => {
     expect(moveSel(0, 1, 3)).toBe(1);

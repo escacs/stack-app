@@ -3,14 +3,20 @@
 // path shown in the top bar. Tested in onboard.test.ts.
 export type OnboardStep = 'who' | 'project' | null;
 
-/** Gate: worker first, then project. A skipped worker counts as set. */
+/**
+ * Gate: worker first, then project, every launch. Nothing is remembered; the
+ * shell opens once both were answered this session (whoDone / projectDone),
+ * and a new user re-asks the project. A skipped worker counts as set.
+ */
 export function onboardStep(
   worker: string | null,
   project: string | null,
   skipped: boolean,
+  whoDone = true,
+  projectDone = true,
 ): OnboardStep {
-  if (!worker && !skipped) return 'who';
-  if (!project) return 'project';
+  if (!whoDone || (!worker && !skipped)) return 'who';
+  if (!projectDone || !project) return 'project';
   return null;
 }
 

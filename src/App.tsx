@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
-import { actionError, appUpdate, appVersion, boot, bootError, config, lock, stack, workerSkipped } from './store';
+import { actionError, appUpdate, appVersion, boot, bootError, config, lock, projectDone, stack, whoDone, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash } from './router';
 import TitleBar from './views/TitleBar';
@@ -26,7 +26,7 @@ export default function App() {
   // of the router. The shell chrome hides until both are answered.
   const step = () => {
     const c = config();
-    return c ? onboardStep(c.worker, c.project, workerSkipped()) : null;
+    return c ? onboardStep(c.worker, c.project, workerSkipped(), whoDone(), projectDone()) : null;
   };
   const updates = () => countUpdates(lock().rows);
 
