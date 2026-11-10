@@ -3,10 +3,11 @@
 #
 #   scripts/uninstall-stack-app.sh [--prefix ~/.local] [--config] [--yes]
 #
-# Removes the AppImage, desktop entry, and installed icons. Never touches
-# the stack checkout or any project. With --config also removes the app
-# config dir (~/.config/codes.escacs.stack), which forgets the stack path
-# and recent projects.
+# Removes the AppImage, desktop entry, installed icons, and the `stack`
+# PATH symlink (only when it points at a stack checkout's bin/stack).
+# Never touches the stack checkout or any project. With --config also
+# removes the app config dir (~/.config/codes.escacs.stack), which forgets
+# the stack path and recent projects.
 
 set -u
 
@@ -48,6 +49,12 @@ fi
 
 remove "$PREFIX/bin/$APPIMAGE_NAME"
 remove "$PREFIX/share/applications/$APP_BIN.desktop"
+if [ -L "$PREFIX/bin/stack" ]; then
+  case "$(readlink "$PREFIX/bin/stack")" in
+    */bin/stack) remove "$PREFIX/bin/stack" ;;
+    *) echo "keeping $PREFIX/bin/stack (not a stack shim link)" ;;
+  esac
+fi
 for size in 32 64 128 256 512; do
   remove "$PREFIX/share/icons/hicolor/${size}x${size}/apps/$APP_BIN.png"
 done

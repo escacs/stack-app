@@ -1,24 +1,38 @@
 // Project picker: folder dialog, remembered recents, repo scan of the
 // configured roots, and the stack-checkout settings override.
-import { For, Show, createSignal } from 'solid-js';
+import { For, Show, createSignal, onMount } from 'solid-js';
 import {
   defaultScanRoots,
   errText,
   pickFolder,
   scanProjects,
+  stackRun,
   type ScanOut,
 } from '../bridge';
+import {
+  describePresetApply,
+  fromStackOut,
+  presetApplyArgs,
+  presetListArgs,
+  type OpSection,
+  type PresetApplyJson,
+  type PresetListItem,
+  type PresetListJson,
+} from '../json';
+import { fmtBytes } from '../parse';
 import {
   chooseProject,
   chooseStackPath,
   clearStackPath,
   config,
+  refreshLock,
   report,
   revalidateStack,
   saveScanRoot,
   saveScanRoots,
   stack,
 } from '../store';
+import { CliErr, OpResult } from '../ui';
 import {
   checkForUpdate,
   downloadAndInstallUpdate,
@@ -214,6 +228,8 @@ export default function Project() {
         )}
       </Show>
 
+      <PresetsSection />
+
       <h2>stack checkout</h2>
       <Show when={stack()} fallback={<p class="dimtxt">checking…</p>}>
         {(st) => (
@@ -251,10 +267,115 @@ export default function Project() {
   );
 }
 
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+
+
+// Named import bundles for setting a project up in one step. Each row
+// expands to its imports (id plus --to each); apply runs `preset apply`
+// and renders the result like an import log, then refreshes the lock.
+function PresetsSection() {
+  const [presets, setPresets] = createSignal<PresetListItem[]>([]);
+  const [loading, setLoading] = createSignal(true);
+  const [note, setNote] = createSignal<string | null>(null);
+  const [open, setOpen] = createSignal<string | null>(null);
+  const [pending, setPending] = createSignal<string | null>(null);
+  const [result, setResult] = createSignal<{ name: string; sections: OpSection[] } | null>(null);
+  const [failed, setFailed] = createSignal<{ name: string; text: string } | null>(null);
+
+  onMount(() => void load());
+
+  async function load() {
+    const c = config();
+    setLoading(true);
+    setNote(null);
+    try {
+      const out = await stackRun('preset', presetListArgs(), c?.project ?? '.', c?.stackPath);
+      setPresets(fromStackOut<PresetListJson>(out).presets);
+    } catch (err) {
+      setNote(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function apply(name: string) {
+    const c = config();
+    if (!c?.project) return;
+    setPending(name);
+    setResult(null);
+    setFailed(null);
+    try {
+      const out = await stackRun('preset', presetApplyArgs(name), c.project, c.stackPath);
+      setResult({ name, sections: describePresetApply(fromStackOut<PresetApplyJson>(out)) });
+      await refreshLock();
+    } catch (err) {
+      setFailed({ name, text: errText(err) });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div>
+      <h2>presets</h2>
+      <Show when={loading()}>
+        <p class="dimtxt">loading…</p>
+      </Show>
+      <Show when={note()}>
+        <CliErr text={note() as string} />
+      </Show>
+      <Show when={!loading() && !note()}>
+        <Show when={presets().length} fallback={<p class="empty">(._.) none</p>}>
+          <div class="rows">
+            <For each={presets()}>
+              {(p) => (
+                <>
+                  <div class="row pick">
+                    <button class="linklike" onClick={() => setOpen(open() === p.name ? null : p.name)}>
+                      {p.name}
+                    </button>
+                    <span class="dimtxt">{p.description}</span>
+                    <span class="lead" aria-hidden="true" />
+                    <button
+                      class="btn"
+                      disabled={pending() !== null || !config()?.project}
+                      onClick={() => void apply(p.name)}
+                    >
+                      {pending() === p.name ? 'applying' : 'apply'}
+                    </button>
+                  </div>
+                  <Show when={open() === p.name}>
+                    <Show
+                      when={p.imports.length}
+                      fallback={<p class="empty">(._.) no imports</p>}
+                    >
+                      <div class="rows preset-imports">
+                        <For each={p.imports}>
+                          {(imp) => (
+                            <div class="row pick">
+                              <span class="nm">{imp.id}</span>
+                              <Show when={imp.to}>
+                                <span class="dimtxt">→ {imp.to}</span>
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </Show>
+                </>
+              )}
+            </For>
+          </div>
+        </Show>
+      </Show>
+      <Show when={failed()}>
+        {(f) => <CliErr text={f().text} />}
+      </Show>
+      <Show when={result()}>
+        {(r) => <OpResult sections={r().sections} label={`preset ${r().name}`} />}
+      </Show>
+    </div>
+  );
 }
 
 // Manual update check / download / install / relaunch against the GitHub

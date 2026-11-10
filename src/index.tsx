@@ -2,10 +2,13 @@ import '../web-vendor/style.css';
 import './app.css';
 import { render } from 'solid-js/web';
 import App from './App';
+import { attachGlide } from './glide';
 
 // Dotted leaders in the vendored web stylesheet read this var (the stack
 // website's web/app.js sets the same value).
 document.documentElement.style.setProperty('--dots', JSON.stringify('. '.repeat(120)));
+
+attachGlide();
 
 const root = document.getElementById('root');
 if (root) {

@@ -84,6 +84,10 @@ AppImage instead (slower, 512px only). What it does:
   (id `stack-app`, matching what tauri-bundler generates)
 - runs `scripts/provision-stack.sh` (skip with `--no-provision`, or point
   at an existing checkout with `--stack <dir>`)
+- symlinks the checkout's `bin/stack` to `~/.local/bin/stack`, so the `stack`
+  terminal command is on `PATH` (skipped with a warning when something else
+  already owns that name; removed on uninstall only if it still points at a
+  stack checkout)
 - refreshes the desktop and icon caches
 
 Options: `--prefix <dir>` (default `~/.local`), `--reinstall`.

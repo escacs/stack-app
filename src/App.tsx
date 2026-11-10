@@ -1,13 +1,16 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js';
-import { boot, bootError, config, node, stack } from './store';
-import { parseHash } from './router';
+import { appVersion, boot, bootError, config, lock, node, stack, workerSkipped } from './store';
+import { countUpdates } from './parse';
+import { href, parseHash } from './router';
+import TitleBar from './views/TitleBar';
 import TopBar from './views/TopBar';
-import Home from './views/Home';
 import Worker from './views/Worker';
 import Project from './views/Project';
 import Browse from './views/Browse';
 import Status from './views/Status';
 import StackSetup from './views/StackSetup';
+import { onboardStep } from './onboard';
+import { ProjectScreen, WhoScreen } from './views/Onboard';
 
 export default function App() {
   const [hash, setHash] = createSignal(parseHash(location.hash));
@@ -21,12 +24,20 @@ export default function App() {
 
   const segs = () => hash().segs;
   const view = () => segs()[0] ?? '';
-  const entryId = () => (view() === 'browse' && segs().length > 1 ? segs().slice(1).join('/') : null);
   const blocked = () => stack() != null && !stack()?.valid;
+  // First run: one question per screen (who, then which project) instead
+  // of the router. The shell chrome hides until both are answered.
+  const step = () => {
+    const c = config();
+    return c ? onboardStep(c.worker, c.project, workerSkipped()) : null;
+  };
 
   return (
     <div id="shell">
-      <TopBar scenario={hash().scenario} segs={segs()} />
+      <TitleBar />
+      <Show when={!step()}>
+        <TopBar scenario={hash().scenario} segs={segs()} />
+      </Show>
       <main id="app">
         <Show when={bootError()}>
           <p class="conflict" role="alert">{bootError()}</p>
@@ -37,10 +48,16 @@ export default function App() {
         <Show when={config() && blocked()}>
           <StackSetup />
         </Show>
-        <Show when={config() && !blocked()}>
+        <Show when={config() && !blocked() && step() === 'who'}>
+          <WhoScreen />
+        </Show>
+        <Show when={config() && !blocked() && step() === 'project'}>
+          <ProjectScreen />
+        </Show>
+        <Show when={config() && !blocked() && !step()}>
           <Switch>
-            <Match when={view() === ''}>
-              <Home scenario={hash().scenario} />
+            <Match when={view() === '' || view() === 'browse'}>
+              <Browse scenario={hash().scenario} segs={view() === '' ? ['browse'] : segs()} />
             </Match>
             <Match when={view() === 'worker'}>
               <Worker scenario={hash().scenario} />
@@ -48,10 +65,7 @@ export default function App() {
             <Match when={view() === 'project'}>
               <Project />
             </Match>
-            <Match when={view() === 'browse'}>
-              <Browse scenario={hash().scenario} id={entryId()} />
-            </Match>
-            <Match when={view() === 'status'}>
+            <Match when={view() === 'installed'}>
               <Status scenario={hash().scenario} />
             </Match>
             <Match when={true}>
@@ -60,11 +74,26 @@ export default function App() {
           </Switch>
         </Show>
       </main>
-      <footer class="appfoot">
-        <span class="dimtxt">
-          {node()?.version ?? 'node?'} · {hash().scenario}
-        </span>
-      </footer>
+      <Show when={!step()}>
+        <footer class="appfoot">
+          <span class="dimtxt">
+            <Show when={appVersion()} fallback="?">
+              {(v) => <span>{v()}</span>}
+            </Show>
+            {' · '}
+            <Show
+              when={countUpdates(lock().rows) > 0}
+              fallback={<span>up to date</span>}
+            >
+              <a href={href(hash().scenario, 'installed')}>
+                {countUpdates(lock().rows)} update{countUpdates(lock().rows) === 1 ? '' : 's'}
+              </a>
+            </Show>
+            {' · '}
+            <span>{node()?.version ?? 'node?'}</span>
+          </span>
+        </footer>
+      </Show>
     </div>
   );
 }

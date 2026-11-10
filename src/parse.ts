@@ -37,6 +37,15 @@ export const pluralOf = (kind: string): string => PLURAL[kind] ?? kind;
 
 export const KINDS = Object.keys(PLURAL);
 
+/** Byte counts the way the website renders them (B/kB/MB/GB). */
+// Byte sizes, exactly like the website's fmt(): 219b, 3.6k, 173k, 1.8m.
+export function fmtBytes(n: number): string {
+  if (!Number.isFinite(n)) return '?';
+  if (n < 1024) return `${n}b`;
+  if (n < 1048576) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)}k`;
+  return `${(n / 1048576).toFixed(1)}m`;
+}
+
 // `- <id> [<usage>(, <status>)?]: <summary>` or `No matching entries.`
 /** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
 export function parseList(text: string): CatalogEntry[] {
@@ -163,6 +172,11 @@ export function rowState(r: StatusRow): RowState {
   if (r.upstreamCount) return 'update';
   if (r.local.length) return 'edited';
   return 'imported';
+}
+
+/** Rows with upstream changes waiting (the footer's update count). */
+export function countUpdates(rows: StatusRow[]): number {
+  return rows.filter((r) => rowState(r) === 'update').length;
 }
 
 export type OpLine = { tag: string; text: string };

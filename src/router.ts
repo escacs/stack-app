@@ -1,7 +1,8 @@
 // Hash routing. The mock bridge reads its scenario from the same hash, so
 // both share one shape: `#<scenario>,<route…>` — e.g. `#populated,/browse`
-// or `#conflicts,/status`. A bare `#empty` (or no hash) means scenario-only
-// with the home route; a bare `#/browse` means route-only.
+// or `#conflicts,/installed`. A bare `#empty` (or no hash) means
+// scenario-only with the default (browse) route; a bare `#/browse` means
+// route-only.
 export type Hash = { scenario: string; segs: string[] };
 
 export const DEFAULT_SCENARIO = 'populated';

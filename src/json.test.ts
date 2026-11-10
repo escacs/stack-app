@@ -6,6 +6,7 @@ import {
   cliText,
   describeImport,
   describeInit,
+  describePresetApply,
   describeRemove,
   describeSync,
   describeUpdate,
@@ -14,14 +15,22 @@ import {
   fromStackOut,
   importArgs,
   parseJsonOut,
+  presetApplyArgs,
+  presetListArgs,
+  presetShowArgs,
   refusalFiles,
   searchArgs,
+  showFileArgs,
   toShowDoc,
+  toShowFile,
   toStatusRows,
   type ImportJson,
   type InitJson,
   type JsonEntry,
   type ListJson,
+  type PresetApplyJson,
+  type PresetListJson,
+  type PresetShowJson,
   type RemoveJson,
   type ShowJson,
   type StatusJson,
@@ -48,6 +57,9 @@ const entry = (id: string, committed = true): JsonEntry => ({
   tags: [],
   targets: [],
   committed,
+  files: 2,
+  bytes: 2048,
+  preview: null,
 });
 
 describe('cliText', () => {
@@ -130,15 +142,33 @@ describe('toShowDoc / docNameFor', () => {
     doc: '\n# body\n',
   };
 
-  it('flattens files and trims the doc body', () => {
+  it('keeps file sizes and trims the doc body', () => {
     expect(toShowDoc(show)).toEqual({
       id: 'skills/x',
       committed: true,
       usage: 'link',
       manifest: { name: 'x', kind: 'skill' },
-      files: ['SKILL.md', 'stack.json'],
+      files: [
+        { path: 'SKILL.md', size: 10 },
+        { path: 'stack.json', size: 5 },
+      ],
       docBody: '# body',
     });
+  });
+
+  it('toShowFile maps bodies and binaries', () => {
+    const base = { command: 'show', id: 'skills/x', file: 'SKILL.md', size: 10 } as const;
+    expect(toShowFile({ ...base, binary: false, markdown: true, text: '# t', base64: null })).toEqual({
+      id: 'skills/x',
+      file: 'SKILL.md',
+      size: 10,
+      binary: false,
+      markdown: true,
+      text: '# t',
+      base64: null,
+    });
+    expect(toShowFile({ ...base, binary: true, markdown: false, text: null, base64: null }).binary).toBe(true);
+    expect(showFileArgs('skills/x', 'a/b.md')).toEqual(['skills/x', '--file', 'a/b.md', '--json']);
   });
 
   it('treats a missing doc as empty', () => {
@@ -334,6 +364,112 @@ describe('describeInit', () => {
     const secs = describeInit(r);
     expect(secs[0].title).toBe('migrated stack.lock.json → stack.toml (2 entries)');
     expect(secs).toHaveLength(1);
+  });
+});
+
+describe('preset args', () => {
+  it('builds list/show/apply argvs, --dry-run for dry runs only', () => {
+    expect(presetListArgs()).toEqual(['list', '--json']);
+    expect(presetShowArgs('web')).toEqual(['show', 'web', '--json']);
+    expect(presetApplyArgs('web')).toEqual(['apply', 'web', '--json']);
+    expect(presetApplyArgs('web', true)).toEqual(['apply', 'web', '--dry-run', '--json']);
+  });
+});
+
+describe('preset payloads', () => {
+  it('decodes list/show/apply shapes', () => {
+    const list = fromStackOut<PresetListJson>(
+      out(
+        JSON.stringify({
+          command: 'preset',
+          action: 'list',
+          count: 1,
+          presets: [
+            {
+              name: 'web',
+              description: 'd',
+              imports: [
+                { id: 'a', to: 'x' },
+                { id: 'b', to: null },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(list.presets).toEqual([
+      {
+        name: 'web',
+        description: 'd',
+        imports: [
+          { id: 'a', to: 'x' },
+          { id: 'b', to: null },
+        ],
+      },
+    ]);
+    const show = fromStackOut<PresetShowJson>(
+      out(
+        JSON.stringify({
+          command: 'preset',
+          action: 'show',
+          preset: { name: 'web', description: 'd', source: 'presets/web.json', imports: [] },
+        }),
+      ),
+    );
+    expect(show.preset.source).toBe('presets/web.json');
+    const apply = fromStackOut<PresetApplyJson>(
+      out(
+        JSON.stringify({
+          command: 'preset',
+          action: 'apply',
+          preset: 'web',
+          commit: 'c',
+          imported: [{ id: 'a', path: 'x' }],
+          already: [],
+          gitignore: 'unchanged',
+        }),
+      ),
+    );
+    expect(apply.preset).toBe('web');
+    expect(apply.conflicts).toBeUndefined();
+  });
+});
+
+describe('describePresetApply', () => {
+  const base: PresetApplyJson = {
+    command: 'preset',
+    action: 'apply',
+    preset: 'web',
+    commit: 'c',
+    imported: [{ id: 'a', path: '.stack/a' }],
+    already: ['b'],
+    gitignore: 'unchanged',
+  };
+
+  it('renders like an import result', () => {
+    const secs = describePresetApply(base);
+    expect(secs[0].title).toBe('imported 1 entry');
+    expect(secs[0].lines).toEqual(['a → .stack/a']);
+    expect(secs[1]).toEqual({ title: 'already here', lines: ['b'], tone: 'dim' });
+  });
+
+  it('reports the quiet case', () => {
+    const secs = describePresetApply({ ...base, imported: [], already: [] });
+    expect(secs).toEqual([{ title: 'nothing to do', lines: [], tone: 'dim' }]);
+  });
+
+  it('leads with dry-run conflicts in a bad tone', () => {
+    const secs = describePresetApply({ ...base, conflicts: ['x/y.md'] });
+    expect(secs[0].tone).toBe('bad');
+    expect(secs[0].title).toContain('conflicts');
+    expect(secs[0].lines).toEqual(['x/y.md']);
+    expect(secs[1].title).toBe('imported 1 entry');
+  });
+
+  it('replaces nothing-to-do when only conflicts remain', () => {
+    const secs = describePresetApply({ ...base, imported: [], already: [], conflicts: ['x'] });
+    expect(secs).toHaveLength(1);
+    expect(secs[0].tone).toBe('bad');
   });
 });
 

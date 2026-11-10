@@ -28,6 +28,11 @@ export type JsonEntry = {
   library?: EntryLibrary;
   /** False when the entry is not in the stack's HEAD commit: unimportable. */
   committed: boolean;
+  /** File count and total bytes (list/search rows). */
+  files: number;
+  bytes: number;
+  /** First image file for the row thumbnail, or null. */
+  preview: string | null;
 };
 
 export type ListJson = {
@@ -117,6 +122,39 @@ export type InitJson = {
   gitignore: 'updated' | 'unchanged';
 };
 
+export type PresetImport = { id: string; to: string | null };
+
+export type PresetListItem = {
+  name: string;
+  description: string;
+  imports: PresetImport[];
+};
+
+export type PresetListJson = {
+  command: 'preset';
+  action: 'list';
+  count: number;
+  presets: PresetListItem[];
+};
+
+export type PresetShowJson = {
+  command: 'preset';
+  action: 'show';
+  preset: { name: string; description: string; source: string; imports: PresetImport[] };
+};
+
+export type PresetApplyJson = {
+  command: 'preset';
+  action: 'apply';
+  preset: string;
+  commit: string;
+  imported: { id: string; path: string; requiredBy?: string }[];
+  already: string[];
+  /** Dry-run only: files that would collide. Absent on a real apply. */
+  conflicts?: string[];
+  gitignore: 'updated' | 'unchanged';
+};
+
 /** A CLI failure: message is the plain-text stderr for the UI. */
 export class CliError extends Error {
   readonly code: number;
@@ -189,7 +227,7 @@ export function toShowDoc(s: ShowJson): {
   committed: boolean;
   usage: string | null;
   manifest: Record<string, unknown>;
-  files: string[];
+  files: ShowFile[];
   docBody: string;
 } {
   return {
@@ -197,8 +235,45 @@ export function toShowDoc(s: ShowJson): {
     committed: s.committed,
     usage: s.usage,
     manifest: s.manifest,
-    files: s.files.map((f) => f.path),
+    files: s.files.map((f) => ({ path: f.path, size: f.size })),
     docBody: (s.doc ?? '').trim(),
+  };
+}
+
+/** show <id> --file <path> --json: one entry file body. */
+export type ShowFileJson = {
+  command: 'show';
+  id: string;
+  file: string;
+  size: number;
+  binary: boolean;
+  markdown: boolean;
+  text: string | null;
+  base64: string | null;
+};
+
+export function showFileArgs(id: string, file: string): string[] {
+  return [id, '--file', file, '--json'];
+}
+
+/** Map a show --file payload onto the UI file shape. */
+export function toShowFile(s: ShowFileJson): {
+  id: string;
+  file: string;
+  size: number;
+  binary: boolean;
+  markdown: boolean;
+  text: string;
+  base64: string | null;
+} {
+  return {
+    id: s.id,
+    file: s.file,
+    size: s.size,
+    binary: s.binary,
+    markdown: s.markdown,
+    text: s.text ?? '',
+    base64: s.base64,
   };
 }
 
@@ -235,6 +310,19 @@ export function searchArgs(query: string, kind: string): string[] {
 export function importArgs(id: string, to: string): string[] {
   const dest = to.trim();
   return dest ? [id, '--to', dest, '--json'] : [id, '--json'];
+}
+
+/** Args for `preset list` / `preset show <name>` / `preset apply <name>`. */
+export function presetListArgs(): string[] {
+  return ['list', '--json'];
+}
+
+export function presetShowArgs(name: string): string[] {
+  return ['show', name, '--json'];
+}
+
+export function presetApplyArgs(name: string, dryRun = false): string[] {
+  return dryRun ? ['apply', name, '--dry-run', '--json'] : ['apply', name, '--json'];
 }
 
 // ------------------------------------------------------------------ op summaries
@@ -297,6 +385,32 @@ export function describeUpdate(r: UpdateJson): OpSection[] {
       lines: r.imported.map((p) => `${p.id} → ${p.path}`),
     });
   }
+  return secs;
+}
+
+/**
+ * Render a preset apply --json result as display sections. The apply log
+ * mirrors the import log, so this delegates to describeImport and only adds
+ * the dry-run conflicts section (a real apply never carries one).
+ */
+export function describePresetApply(r: PresetApplyJson): OpSection[] {
+  const secs = describeImport({
+    command: 'import',
+    commit: r.commit,
+    imported: r.imported,
+    already: r.already,
+    gitignore: r.gitignore,
+  });
+  const conflicts = r.conflicts ?? [];
+  if (!conflicts.length) return secs;
+  const sec: OpSection = {
+    title: 'conflicts (dry run, nothing was written)',
+    lines: [...conflicts],
+    tone: 'bad',
+  };
+  const idle = secs.findIndex((s) => s.title === 'nothing to do');
+  if (idle >= 0) secs[idle] = sec;
+  else secs.unshift(sec);
   return secs;
 }
 

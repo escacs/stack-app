@@ -8,7 +8,7 @@
 // Bare `#empty` etc. still work (home route).
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
-// scan, noworker, bad-stack, fresh.
+// scan, noworker, noproject, bad-stack, fresh.
 (() => {
   'use strict';
 
@@ -63,8 +63,35 @@
     return m;
   };
 
-  const entryFiles = (e) =>
-    e.payload ? ['README.md', 'stack.json', `${e.payload}/AGENTS.md`, `${e.payload}/config.json`] : ['README.md', 'stack.json'];
+  const entryFiles = (e) => {
+    const base = e.payload
+      ? ['README.md', 'stack.json', `${e.payload}/AGENTS.md`, `${e.payload}/config.json`]
+      : ['README.md', 'stack.json'];
+    // One image-bearing entry so previews and file bodies render.
+    if (e.id === 'assets/escacs-mark') base.push('escacs-logo.svg');
+    return base;
+  };
+
+  const entryFileBody = (e, path) => {
+    if (path.endsWith('.svg')) {
+      return {
+        binary: false,
+        markdown: false,
+        text: null,
+        // Tiny mint-on-black "S" tile (precomputed; the mock runs in a browser).
+        base64: 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMGEwYTBhIi8+PHRleHQgeD0iOCIgeT0iNDAiIGZvbnQtc2l6ZT0iMzIiIGZpbGw9IiM3Q0ZGQjIiPlM8L3RleHQ+PC9zdmc+',
+      };
+    }
+    if (path === 'stack.json') {
+      return { binary: false, markdown: false, text: JSON.stringify(entryManifest(e), null, 2), base64: null };
+    }
+    if (path === entryDocName(e)) {
+      return { binary: false, markdown: true, text: entryDocBody(e), base64: null };
+    }
+    if (path.endsWith('.md')) return { binary: false, markdown: true, text: `# Fixture ${path}\n`, base64: null };
+    if (path.endsWith('.png')) return { binary: true, markdown: false, text: null, base64: null };
+    return { binary: false, markdown: false, text: `fixture contents of ${path}\n`, base64: null };
+  };
 
   const entryDocName = (e) => (e.id.startsWith('skills/') || e.id.startsWith('styles/') ? 'SKILL.md' : 'README.md');
 
@@ -78,22 +105,28 @@
     'A second `## ` heading on purpose: doc bodies keep everything after the doc start.',
   ].join('\n');
 
-  const entryJson = (e) => ({
-    id: e.id,
-    kind: entryKind(e),
-    name: entryName(e),
-    summary: e.summary,
-    status: e.status,
-    origin: 'custom',
-    usage: e.usage,
-    doc: `${e.id}/${entryDocName(e)}`,
-    tags: [entryName(e), 'fixture'],
-    targets: ['any'],
-    ...(e.requires ? { requires: e.requires } : {}),
-    ...(e.payload ? { payload: e.payload } : {}),
-    ...(e.library ? { library: e.library } : {}),
-    committed: e.committed !== false,
-  });
+  const entryJson = (e) => {
+    const files = entryFiles(e);
+    return {
+      id: e.id,
+      kind: entryKind(e),
+      name: entryName(e),
+      summary: e.summary,
+      status: e.status,
+      origin: 'custom',
+      usage: e.usage,
+      doc: `${e.id}/${entryDocName(e)}`,
+      tags: [entryName(e), 'fixture'],
+      targets: ['any'],
+      ...(e.requires ? { requires: e.requires } : {}),
+      ...(e.payload ? { payload: e.payload } : {}),
+      ...(e.library ? { library: e.library } : {}),
+      committed: e.committed !== false,
+      files: files.length,
+      bytes: files.reduce((n, p) => n + 100 + p.length, 0),
+      preview: files.find((p) => /\.(png|jpe?g|gif|webp|avif|svg|ico)$/i.test(p)) ?? null,
+    };
+  };
 
   const showJson = (e) => ({
     command: 'show',
@@ -157,6 +190,30 @@
     if (e?.payload) return '.';
     return `.stack/${id}`;
   };
+
+  // ---------------------------------------------------------- preset fixtures
+  // Rendered into the exact JSON shapes of `preset list/show/apply --json`.
+
+  const PRESETS = [
+    {
+      name: 'web',
+      description: 'React starter: button plus the file-pr skill.',
+      source: 'presets/web.json',
+      imports: [
+        { id: 'components/react/button', to: 'src/components/ui' },
+        { id: 'skills/file-pr', to: null },
+      ],
+    },
+    {
+      name: 'docs',
+      description: 'Docs setup: conventions plus the agents-md scaffold.',
+      source: 'presets/docs.json',
+      imports: [
+        { id: 'systems/engineering-conventions', to: null },
+        { id: 'templates/agents-md', to: null },
+      ],
+    },
+  ];
 
   // ------------------------------------------------------------- scenarios
 
@@ -317,6 +374,25 @@
       scan: [],
       pick: '/home/dev/projects/folio',
     }),
+    // Onboarding step 2: worker set, no project yet. Recents plus scan
+    // results, so the project screen shows every block.
+    noproject: () => ({
+      config: {
+        ...baseConfig,
+        recentProjects: ['/home/dev/projects/folio', '/home/dev/projects/sandbox'],
+      },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({ path, valid: true, markers: ['.git'], errors: [] }),
+      lock: [],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [
+        { path: '/home/dev/projects/folio', name: 'folio', hasLock: true, markers: ['.git', 'stack.toml'] },
+        { path: '/home/dev/projects/auralis', name: 'auralis', hasLock: false, markers: ['.git'] },
+      ],
+      pick: '/home/dev/projects/auralis',
+    }),
     // Plain folder, no record file of either generation: status must offer
     // init. Running init flips the markers to stack.toml.
     fresh: () => ({
@@ -362,15 +438,17 @@
   // answer in the real CLI shapes (JSON when asked, text otherwise).
 
   function splitArgs(args) {
-    const out = { json: false, kind: null, to: null, positional: [] };
+    const out = { json: false, dryRun: false, kind: null, to: null, file: null, positional: [] };
     let dashdash = false;
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       if (dashdash) { out.positional.push(a); continue; }
       if (a === '--') { dashdash = true; continue; }
       if (a === '--json') { out.json = true; continue; }
+      if (a === '--dry-run') { out.dryRun = true; continue; }
       if (a === '--kind') { out.kind = args[++i]; continue; }
       if (a === '--to') { out.to = args[++i]; continue; }
+      if (a === '--file') { out.file = args[++i]; continue; }
       out.positional.push(a);
     }
     return out;
@@ -381,7 +459,7 @@
 
   function stack({ subcommand: sub, args = [] }) {
     if (!fx.node.ok) return errOut('node 22+ is required (fixture: no-node scenario)');
-    const { json, kind, to, positional } = splitArgs(args);
+    const { json, dryRun, kind, to, file, positional } = splitArgs(args);
     const visible = CATALOG.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
     switch (sub) {
       case 'list': {
@@ -408,6 +486,19 @@
         const e = visible.find((x) => x.id === positional[0]);
         if (!e) {
           return errOut(`no entry "${positional[0]}"; search first, or list with \`stack list\``);
+        }
+        if (file != null) {
+          const known = entryFiles(e);
+          if (!known.includes(file)) return errOut(`no such file '${file}' in ${e.id}`);
+          const body = entryFileBody(e, file);
+          if (!json) {
+            if (body.text == null) return errOut(`binary file '${file}'; use --json for base64`);
+            return okOut(body.text);
+          }
+          return jsonOut({
+            command: 'show', id: e.id, file, size: 100 + file.length,
+            binary: body.binary, markdown: body.markdown, text: body.text, base64: body.base64,
+          });
         }
         return json ? jsonOut(showJson(e)) : okOut(showText(e));
       }
@@ -458,6 +549,63 @@
         }
         if (!json) return okOut(log.join('\n'));
         return jsonOut({ command: 'import', commit: FULL, imported, already, gitignore: 'unchanged' });
+      }
+      case 'preset': {
+        const [action, name] = positional;
+        if (action === 'list') {
+          const rows = PRESETS.map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
+          if (!json) return okOut(rows.length ? rows.map((p) => `- ${p.name}: ${p.description}`).join('\n') : 'No presets.');
+          return jsonOut({ command: 'preset', action: 'list', count: rows.length, presets: rows });
+        }
+        if (action === 'show') {
+          const p = PRESETS.find((x) => x.name === name);
+          if (!p) return errOut(`no preset "${name}"`);
+          if (!json) {
+            return okOut([
+              `# preset ${p.name}`, '', p.description, '',
+              ...p.imports.map((i) => `- ${i.id}${i.to ? ` -> ${i.to}` : ''}`),
+            ].join('\n'));
+          }
+          return jsonOut({ command: 'preset', action: 'show', preset: structuredClone(p) });
+        }
+        if (action === 'apply') {
+          const p = PRESETS.find((x) => x.name === name);
+          if (!p) return errOut(`no preset "${name}"`);
+          // Mirrors the import case: same log lines, same lock updates, same
+          // auto-import of requires. A dry run reports without writing.
+          const log = [];
+          const imported = [];
+          const already = [];
+          for (const imp of p.imports) {
+            const e = visible.find((x) => x.id === imp.id);
+            if (!e || e.committed === false) {
+              return errOut(`${imp.id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
+            }
+            if (fx.lock.some((r) => r.id === imp.id)) {
+              log.push(`have    ${imp.id} (use \`stack update\` for newer versions)`);
+              already.push(imp.id);
+              continue;
+            }
+            const dest = imp.to || destFor(imp.id);
+            if (!dryRun) fx.lock.push({ id: imp.id, commit: FULL, path: dest, local: [], upstream: [] });
+            log.push(`import  ${imp.id} -> ${dest}`);
+            imported.push({ id: imp.id, path: dest });
+            for (const req of e.requires ?? []) {
+              if (!fx.lock.some((r) => r.id === req)) {
+                const rd = destFor(req);
+                if (!dryRun) fx.lock.push({ id: req, commit: FULL, path: rd, local: [], upstream: [] });
+                log.push(`import  ${req} -> ${rd} (required by ${imp.id})`);
+                imported.push({ id: req, path: rd, requiredBy: imp.id });
+              }
+            }
+          }
+          if (!json) return okOut(log.join('\n'));
+          return jsonOut({
+            command: 'preset', action: 'apply', preset: name, commit: FULL,
+            imported, already, ...(dryRun ? { conflicts: [] } : {}), gitignore: 'unchanged',
+          });
+        }
+        return errOut(`unknown preset action "${action}"`);
       }
       case 'update': {
         const rows = fx.lock.filter((r) => !positional.length || positional.includes(r.id));
@@ -564,6 +712,8 @@
     },
     validate_project: async ({ path }) => fx.report(path),
     node_status: async () => ({ ...fx.node }),
+    // Release version the footer shows (mirrors tauri.conf in the real app).
+    'plugin:app|version': async () => '0.1.0',
     stack_run: async (a) => stack(a),
     // Real shell shape: { root?, roots?, stackDir? } ->
     // { root, roots, repos, capped }.

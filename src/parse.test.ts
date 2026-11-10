@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   KINDS,
+  countUpdates,
   kindOf,
   manifestList,
   manifestName,
@@ -12,6 +13,7 @@ import {
   parseStatus,
   pluralOf,
   rowState,
+  type StatusRow,
 } from './parse';
 
 describe('kinds', () => {
@@ -34,13 +36,25 @@ describe('manifests', () => {
 });
 
 describe('rowState', () => {
-  const row = (o: object) => ({ id: 'a', commit: 'c', path: 'p', local: [], upstreamCount: null, gone: false, ...o });
+  const row = (o: object): StatusRow => ({ id: 'a', commit: 'c', path: 'p', local: [], upstreamCount: null, gone: false, ...o });
   it('orders gone > update > edited > imported', () => {
     expect(rowState(row({}))).toBe('imported');
     expect(rowState(row({ local: ['f'] }))).toBe('edited');
     expect(rowState(row({ upstreamCount: 2 }))).toBe('update');
     expect(rowState(row({ local: ['f'], upstreamCount: 1 }))).toBe('update');
     expect(rowState(row({ gone: true, local: ['f'], upstreamCount: 3 }))).toBe('gone');
+  });
+  it('countUpdates counts update rows only', () => {
+    expect(countUpdates([])).toBe(0);
+    expect(
+      countUpdates([
+        row({}),
+        row({ local: ['f'] }),
+        row({ upstreamCount: 2 }),
+        row({ local: ['f'], upstreamCount: 1 }),
+        row({ gone: true, upstreamCount: 3 }),
+      ]),
+    ).toBe(2);
   });
 });
 

@@ -9,7 +9,7 @@ describe('parseHash', () => {
   });
 
   it('splits scenario,route', () => {
-    expect(parseHash('#conflicts,/status')).toEqual({ scenario: 'conflicts', segs: ['status'] });
+    expect(parseHash('#conflicts,/installed')).toEqual({ scenario: 'conflicts', segs: ['installed'] });
     expect(parseHash('#populated,/browse/skills/file-pr')).toEqual({
       scenario: 'populated',
       segs: ['browse', 'skills', 'file-pr'],

@@ -56,6 +56,16 @@
         { id: "skills/file-pr", commit: FULL, path: ".agents/skills/file-pr", local: [], upstream: [], gone: false },
       ],
     },
+    noproject: {
+      config: {
+        ...baseConfig,
+        recentProjects: ["/home/dev/projects/folio", "/home/dev/projects/sandbox"],
+      },
+      report: (path) => ({ path, valid: true, markers: [".git"], errors: [] }),
+      node: { ok: true, version: "v22.14.0", major: 22, error: null },
+      stack: structuredClone(okStack),
+      lock: [],
+    },
     "no-node": {
       config: { ...baseConfig },
       report: (path) => ({ path, valid: false, markers: [], errors: ["cannot resolve path"] }),
@@ -86,6 +96,13 @@
       return json({ command: sub, kind: null, count: 0, entries: [], uncommitted: [] });
     }
     if (sub === "show") return err(`no entry "${positional[0]}"; search first, or list with \`stack list\``);
+    if (sub === "preset") {
+      const [action, name] = positional;
+      if (action === "list") return json({ command: "preset", action: "list", count: 0, presets: [] });
+      if (action === "show") return err(`no preset "${name}" (minimal fixture mock)`);
+      if (action === "apply") return err(`cannot apply preset "${name}" (minimal fixture mock)`);
+      return err(`unknown preset action "${action}" (minimal fixture mock)`);
+    }
     if (sub === "status") return json({ command: "status", commit: FULL, rows: structuredClone(fx.lock) });
     if (sub === "init") {
       if (fx.lock.length) return err("stack.toml already tracks imports; nothing to do");
@@ -111,6 +128,8 @@
     },
     validate_project: async ({ path }) => fx.report(path),
     node_status: async () => ({ ...fx.node }),
+    // Release version the footer shows (mirrors tauri.conf in the real app).
+    "plugin:app|version": async () => "0.1.0",
     stack_run: async (a) => stackRouter(a),
     scan_projects: async ({ root, roots } = {}) => {
       const picked = roots?.length ? roots : root ? [root] : ["/home/dev/projects"];

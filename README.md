@@ -122,12 +122,14 @@ type StackReport = { path: string; valid: boolean; source: string; git: boolean;
 - Subcommands: `list`, `search`, `show`, `import`, `status`, `update`,
   `remove`, `sync` (restore ignored imports from the lock), `gitignore`
   (rewrite the managed escacs block), `init` (create `stack.toml`, adopting a
-  legacy `stack.lock.json`). `sync`/`gitignore`/`init` take no args.
+  legacy `stack.lock.json`), `preset` (`list`, `show <name>`, `apply <name>`).
+  `sync`/`gitignore`/`init` take no args.
   Everything else (`serve`, `catalog`, `check`, `link-skills`, `path`, …) is
   rejected, so the UI cannot reach repo-maintenance commands.
 - Flags: only `--kind <kind>`, `--to <project-relative-dir>` (single-entry
-  `import` only), `--ref <rev>`. `--project` is always set by Rust itself and
-  cannot be overridden.
+  `import` only), `--ref <rev>`, `--file <entry-relative-path>` (`show`
+  only, for entry file bodies), `--dry-run` (`preset apply` only).
+  `--project` is always set by Rust itself and cannot be overridden.
 - Entry ids are charset-checked; `--to` must be project-relative and is
   confined (traversal and symlink escapes rejected).
 - `stackDir` resolution order: the settings override (persist in
@@ -147,6 +149,20 @@ commit/push; never put credentials anywhere (none are handled, none logged).
 Capabilities (`src-tauri/capabilities/default.json`) grant only
 `core:default` and `dialog:allow-open`. Custom `invoke` commands need no
 capability entries; adding a plugin call later means adding its permission.
+
+## Presets
+
+Presets are named import bundles for setting a project up in one step. The
+Project view lists them with descriptions; each row expands to its imports
+(one id plus `--to` each) and an apply button runs `preset apply`, rendering
+the result like an import log and refreshing the lock. Apply refuses exactly
+like import: nothing is written when files differ.
+
+Wire shapes (`--json`):
+
+- `preset list`: `{command:'preset', action:'list', count, presets:[{name, description, imports:[{id, to}]}]}`
+- `preset show <name>`: `{command:'preset', action:'show', preset:{name, description, source, imports}}`
+- `preset apply <name>`: `{command:'preset', action:'apply', preset, commit, imported:[{id, path, requiredBy?}], already, gitignore}` plus `conflicts` on a `--dry-run` only; the text log mirrors the import log.
 
 ## Vendored web style (snapshot, not shared source)
 

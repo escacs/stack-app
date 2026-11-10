@@ -5,21 +5,23 @@ import { href } from '../router';
 
 export default function TopBar(props: { scenario: string; segs: string[] }) {
   const view = () => props.segs[0] ?? '';
+  const cur = (seg: string) => (seg === 'browse' ? view() === '' || view() === 'browse' : view() === seg);
   const nav = () => [
+    ['browse', 'browse'],
+    ['installed', 'installed'],
     ['worker', 'worker'],
     ['project', 'project'],
-    ['browse', 'browse'],
-    ['status', 'status'],
   ];
   return (
     <header id="topbar">
       <nav aria-label="views">
-        <a href={href(props.scenario)} class={view() === '' ? 'cur' : ''}>~</a>
         <For each={nav()}>
-          {([seg, label]) => (
+          {([seg, label], i) => (
             <>
-              <span class="sep">/</span>
-              <a href={href(props.scenario, seg)} class={view() === seg ? 'cur' : ''}>
+              <Show when={i() > 0}>
+                <span class="sep">/</span>
+              </Show>
+              <a href={href(props.scenario, seg)} class={cur(seg) ? 'cur' : ''}>
                 {label}
               </a>
             </>

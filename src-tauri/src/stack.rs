@@ -34,7 +34,8 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(180);
 /// managed gitignore block (migrating a legacy `stack.lock.json`); `sync`
 /// restores ignored imports from the lock; `gitignore` rewrites the managed
 /// escacs block. All three take no positional args and no flags (`--project`
-/// is always set by Rust).
+/// is always set by Rust). `preset` takes an action positional (`list`,
+/// `show <name>` or `apply <name>`); only `apply` accepts `--dry-run`.
 const ALLOW_SUBCOMMANDS: &[&str] = &[
     "list",
     "search",
@@ -46,11 +47,12 @@ const ALLOW_SUBCOMMANDS: &[&str] = &[
     "sync",
     "gitignore",
     "init",
+    "preset",
 ];
 
-/// Flags that take a value. `--json` (boolean) and `--` (separator) are
-/// handled separately in [`build_argv`].
-const ALLOW_FLAGS: &[&str] = &["--kind", "--to", "--ref"];
+/// Flags that take a value. `--json` and `--dry-run` (booleans) and `--`
+/// (separator) are handled separately in [`build_argv`].
+const ALLOW_FLAGS: &[&str] = &["--kind", "--to", "--ref", "--file"];
 const KINDS: &[&str] = &[
     "skill",
     "style",
@@ -130,14 +132,17 @@ impl BuiltArgv {
 }
 
 /// Validate `args` for `sub`. `project` must already be canonical.
-/// Accepts `--json` (boolean, passed through to the CLI) and `--`
-/// (separator: everything after it is positional, never a flag).
+/// Accepts `--json` (boolean, passed through to the CLI), `--dry-run`
+/// (boolean, `preset apply` only) and `--` (separator: everything after it
+/// is positional, never a flag).
 fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, String> {
     let mut positionals: Vec<&str> = Vec::new();
     let mut kind: Option<&str> = None;
     let mut to: Option<&str> = None;
     let mut git_ref: Option<&str> = None;
+    let mut file: Option<&str> = None;
     let mut json = false;
+    let mut dryrun = false;
     let mut dashdash = false;
     let mut i = 0;
     while i < args.len() {
@@ -148,6 +153,8 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
             dashdash = true;
         } else if a == "--json" {
             json = true;
+        } else if a == "--dry-run" {
+            dryrun = true;
         } else if a.starts_with('-') {
             if !ALLOW_FLAGS.contains(&a) {
                 return Err(format!("flag '{a}' is not allowed"));
@@ -171,6 +178,14 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                     }
                     git_ref = Some(v);
                 }
+                "--file" => {
+                    // Entry-relative file path: same segment rules as ids
+                    // (relative, no `..`, no absolute, no backslash/NUL).
+                    if !is_id(v) {
+                        return Err(format!("invalid --file value"));
+                    }
+                    file = Some(v);
+                }
                 _ => unreachable!("allowlist checked above"),
             }
         } else {
@@ -178,8 +193,17 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
         }
         i += 1;
     }
-    // Emit flags in one deterministic order: --kind, --to, --ref, --json.
-    let flag_vec = |with_kind: bool, with_to: bool, with_ref: bool| -> Result<Vec<String>, String> {
+    if dryrun && sub != "preset" {
+        return Err("--dry-run is only supported by preset apply".to_string());
+    }
+    // Emit flags in one deterministic order: --kind, --to, --ref, --file,
+    // --dry-run, --json.
+    let flag_vec = |with_kind: bool,
+                    with_to: bool,
+                    with_ref: bool,
+                    with_file: bool,
+                    with_dryrun: bool|
+     -> Result<Vec<String>, String> {
         let mut flags: Vec<String> = Vec::new();
         if with_kind {
             if let Some(k) = kind {
@@ -196,6 +220,14 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
             if let Some(r) = git_ref {
                 flags.extend(["--ref".to_string(), r.to_string()]);
             }
+        }
+        if with_file {
+            if let Some(f) = file {
+                flags.extend(["--file".to_string(), f.to_string()]);
+            }
+        }
+        if with_dryrun && dryrun {
+            flags.push("--dry-run".to_string());
         }
         if json {
             flags.push("--json".to_string());
@@ -216,10 +248,13 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                         .to_string(),
                 ],
             };
-            if kind.is_some() || to.is_some() || git_ref.is_some() {
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
                 return Err("list takes no flags".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, false)?, list_pos))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, false, false, false)?,
+                list_pos,
+            ))
         }
         "search" => {
             if positionals.len() != 1 || positionals[0].is_empty() {
@@ -229,67 +264,129 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
             if q.len() > 500 || q.contains('\0') {
                 return Err("invalid search query".to_string());
             }
-            if to.is_some() || git_ref.is_some() {
+            if to.is_some() || git_ref.is_some() || file.is_some() {
                 return Err("search allows only --kind".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(true, false, false)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(true, false, false, false, false)?,
+                pos(),
+            ))
         }
         "show" => {
             if positionals.len() != 1 || !is_id(positionals[0]) {
                 return Err("show takes exactly one entry id".to_string());
             }
             if kind.is_some() || to.is_some() || git_ref.is_some() {
-                return Err("show takes no flags".to_string());
+                return Err("show allows only --file".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, false)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, false, true, false)?,
+                pos(),
+            ))
         }
         "import" => {
             if positionals.is_empty() || !positionals.iter().all(|p| is_id(p)) {
                 return Err("import takes one or more entry ids".to_string());
             }
-            if kind.is_some() {
-                return Err("import takes no --kind".to_string());
+            if kind.is_some() || file.is_some() {
+                return Err("import takes no --kind/--file".to_string());
             }
             if to.is_some() && positionals.len() > 1 {
                 return Err("--to works with a single entry only".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, true, true)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, true, true, false, false)?,
+                pos(),
+            ))
         }
         "status" => {
             if !positionals.is_empty() {
                 return Err("status takes no entry ids".to_string());
             }
-            if kind.is_some() || to.is_some() {
+            if kind.is_some() || to.is_some() || file.is_some() {
                 return Err("status allows only --ref".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, true)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, true, false, false)?,
+                pos(),
+            ))
         }
         "update" => {
             if !positionals.iter().all(|p| is_id(p)) {
                 return Err("invalid entry id".to_string());
             }
-            if kind.is_some() || to.is_some() {
+            if kind.is_some() || to.is_some() || file.is_some() {
                 return Err("update allows only --ref".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, true)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, true, false, false)?,
+                pos(),
+            ))
         }
         "remove" => {
             if positionals.len() != 1 || !is_id(positionals[0]) {
                 return Err("remove takes exactly one entry id".to_string());
             }
-            if kind.is_some() || to.is_some() || git_ref.is_some() {
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
                 return Err("remove takes no flags".to_string());
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, false)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, false, false, false)?,
+                pos(),
+            ))
         }
         "sync" | "gitignore" | "init" => {
             if !positionals.is_empty() {
                 return Err(format!("{sub} takes no entry ids"));
             }
-            if kind.is_some() || to.is_some() || git_ref.is_some() {
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
                 return Err(format!("{sub} takes no flags"));
             }
-            Ok(BuiltArgv::new(flag_vec(false, false, false)?, pos()))
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, false, false, false)?,
+                pos(),
+            ))
+        }
+        "preset" => {
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
+                return Err("preset takes no --kind/--to/--ref/--file".to_string());
+            }
+            match positionals.first().copied() {
+                Some("list") => {
+                    if positionals.len() != 1 {
+                        return Err("preset list takes no preset name".to_string());
+                    }
+                    if dryrun {
+                        return Err("preset list takes no --dry-run".to_string());
+                    }
+                    Ok(BuiltArgv::new(
+                        flag_vec(false, false, false, false, false)?,
+                        pos(),
+                    ))
+                }
+                Some("show") => {
+                    if positionals.len() != 2 || !is_id(positionals[1]) {
+                        return Err("preset show takes exactly one preset name".to_string());
+                    }
+                    if dryrun {
+                        return Err("preset show takes no --dry-run".to_string());
+                    }
+                    Ok(BuiltArgv::new(
+                        flag_vec(false, false, false, false, false)?,
+                        pos(),
+                    ))
+                }
+                Some("apply") => {
+                    if positionals.len() != 2 || !is_id(positionals[1]) {
+                        return Err("preset apply takes exactly one preset name".to_string());
+                    }
+                    Ok(BuiltArgv::new(
+                        flag_vec(false, false, false, false, true)?,
+                        pos(),
+                    ))
+                }
+                _ => Err("preset takes an action: list, show or apply".to_string()),
+            }
         }
         _ => Err(format!("subcommand '{sub}' is not allowed")),
     }
@@ -740,6 +837,32 @@ mod tests {
     }
 
     #[test]
+    fn show_file_passes_through_and_others_reject_it() {
+        let p = proj("file");
+        let argv = build_argv(
+            "show",
+            &args(&["skills/file-pr", "--file", "SKILL.md"]),
+            &p,
+        )
+        .unwrap();
+        assert_eq!(argv.flags, vec!["--file", "SKILL.md"]);
+        assert_eq!(argv.positionals, vec!["skills/file-pr"]);
+        // Traversal, absolute, empty and missing values are refused.
+        for bad in ["../x", "/etc/hostname", "a\\b", "", ".", "x/../y"] {
+            assert!(
+                build_argv("show", &args(&["skills/file-pr", "--file", bad]), &p).is_err(),
+                "rejects {bad:?}"
+            );
+        }
+        assert!(build_argv("show", &args(&["skills/file-pr", "--file"]), &p).is_err());
+        // No other subcommand accepts --file.
+        assert!(build_argv("list", &args(&["--file", "x"]), &p).is_err());
+        assert!(build_argv("import", &args(&["skills/a", "--file", "x"]), &p).is_err());
+        assert!(build_argv("status", &args(&["--file", "x"]), &p).is_err());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
     fn import_allows_ids_to_and_ref() {
         let p = proj("imp");
         let argv = build_argv("import", &args(&["skills/file-pr", "--ref", "HEAD"]), &p).unwrap();
@@ -811,6 +934,44 @@ mod tests {
     }
 
     #[test]
+    fn preset_routing_validates_actions_names_and_dry_run() {
+        let p = proj("pre");
+        let argv = build_argv("preset", &args(&["list", "--json"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--json"]);
+        assert_eq!(argv.positionals, vec!["list"]);
+        let argv = build_argv("preset", &args(&["show", "web", "--json"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--json"]);
+        assert_eq!(argv.positionals, vec!["show", "web"]);
+        let argv = build_argv("preset", &args(&["apply", "web"]), &p).unwrap();
+        assert!(argv.flags.is_empty());
+        assert_eq!(argv.positionals, vec!["apply", "web"]);
+        // Actions take exactly their shape; anything else is rejected.
+        assert!(build_argv("preset", &[], &p).is_err());
+        assert!(build_argv("preset", &args(&["destroy", "x"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["list", "extra"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["show"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["apply"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["show", "a", "b"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["apply", "../evil"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["apply", ""]), &p).is_err());
+        // --dry-run passes through for apply only.
+        let argv = build_argv("preset", &args(&["apply", "web", "--dry-run", "--json"]), &p)
+            .unwrap();
+        assert_eq!(argv.flags, vec!["--dry-run", "--json"]);
+        assert_eq!(argv.positionals, vec!["apply", "web"]);
+        assert!(build_argv("preset", &args(&["list", "--dry-run"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["show", "web", "--dry-run"]), &p).is_err());
+        // No other subcommand accepts --dry-run; preset takes no valued flags.
+        assert!(build_argv("list", &args(&["--dry-run"]), &p).is_err());
+        assert!(build_argv("import", &args(&["a", "--dry-run"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["list", "--kind", "skill"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["apply", "web", "--to", "x"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["apply", "web", "--ref", "v1"]), &p).is_err());
+        assert!(build_argv("preset", &args(&["show", "web", "--file", "x"]), &p).is_err());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
     fn json_flag_passes_through() {
         let p = proj("json");
         let argv = build_argv("list", &args(&["--json"]), &p).unwrap();
@@ -870,7 +1031,11 @@ mod tests {
         for sub in ["list", "search", "show", "status"] {
             assert_eq!(timeout_for(sub), Duration::from_secs(30));
         }
-        for sub in ["import", "update", "remove", "sync", "gitignore", "init"] {
+        // `preset` applies under the write budget (list/show just get the
+        // longer leash; the timeout only sees the subcommand).
+        for sub in [
+            "import", "update", "remove", "sync", "gitignore", "init", "preset",
+        ] {
             assert_eq!(timeout_for(sub), Duration::from_secs(180));
         }
     }

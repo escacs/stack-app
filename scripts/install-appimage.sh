@@ -5,7 +5,8 @@
 #
 # Installs the AppImage to ~/.local/bin, writes a desktop entry plus icons
 # (the bundler's own id: stack-app, StartupWMClass=stack-app), then runs
-# provision-stack.sh so first launch finds the stack checkout.
+# provision-stack.sh so first launch finds the stack checkout, and symlinks
+# the checkout's bin/stack into the prefix bin so `stack` is on PATH.
 #
 # Options:
 #   --prefix <dir>   install prefix (default ~/.local)
@@ -117,6 +118,50 @@ if [ -n "$STACK_DIR" ]; then
   "$SCRIPT_DIR/provision-stack.sh" --dir "$STACK_DIR"
 elif [ "$PROVISION" = "yes" ]; then
   "$SCRIPT_DIR/provision-stack.sh" || true
+fi
+
+# --- put `stack` on PATH ---
+# Whatever checkout provisioning settled on (--stack, a fresh clone, or a
+# previously pinned path): link its bin/stack shim into the prefix bin.
+resolve_stack_dir() {
+  if [ -n "$STACK_DIR" ]; then
+    (cd "$STACK_DIR" && pwd 2>/dev/null) || true
+    return 0
+  fi
+  cfg="${XDG_CONFIG_HOME:-$HOME/.config}/codes.escacs.stack/config.json"
+  [ -f "$cfg" ] || return 0
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stackPath") or "")' "$cfg" 2>/dev/null \
+    || node -e 'try { process.stdout.write(require(process.argv[1]).stackPath || "") } catch (e) {}' "$cfg" 2>/dev/null \
+    || true
+}
+
+link_stack_shim() {  # link_stack_shim <stackdir>
+  local shim="$1/bin/stack"
+  local link="$BIN_DIR/stack"
+  [ -x "$shim" ] || { echo "warning: no executable bin/stack in $1; \`stack\` left off PATH" >&2; return 0; }
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "warning: $link exists and is not a symlink; leaving it alone" >&2
+    return 0
+  fi
+  ln -sf "$shim" "$link"
+  echo "linked $link -> $shim"
+  case ":$PATH:" in
+    *":$BIN_DIR:"*)
+      if command -v stack >/dev/null 2>&1; then
+        echo "stack on PATH: $(command -v stack)"
+      else
+        echo "warning: $link not resolving yet; open a new shell" >&2
+      fi
+      ;;
+    *) echo "warning: $BIN_DIR is not on PATH; add: export PATH=\"$BIN_DIR:\$PATH\"" >&2 ;;
+  esac
+}
+
+resolved="$(resolve_stack_dir)"
+if [ -n "$resolved" ]; then
+  link_stack_shim "$resolved"
+else
+  echo "warning: no stack checkout resolved; \`stack\` left off PATH (re-run after provisioning)" >&2
 fi
 
 echo ""

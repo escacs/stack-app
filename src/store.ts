@@ -2,6 +2,7 @@
 // validation. Views keep their own local state (search text, form fields,
 // op results).
 import { createMemo, createSignal } from 'solid-js';
+import { getVersion } from '@tauri-apps/api/app';
 import {
   addRecentProject,
   errText,
@@ -36,6 +37,12 @@ export const [workersError, setWorkersError] = createSignal<string | null>(null)
 export const [lock, setLock] = createSignal<LockStatus>({ commit: null, rows: [] });
 export const [busy, setBusy] = createSignal<string | null>(null);
 export const [stack, setStack] = createSignal<StackReport | null>(null);
+// Release version from tauri.conf (matches the GitHub release tag minus
+// the `v`). Null until boot resolves it (or when the bridge lacks it).
+export const [appVersion, setAppVersion] = createSignal<string | null>(null);
+// First-run onboarding: set when the user continues past "who are you?"
+// without a worker (empty stack or failed list). Session-only.
+export const [workerSkipped, setWorkerSkipped] = createSignal(false);
 
 export const project = createMemo(() => config()?.project ?? null);
 export const workerName = createMemo(() => config()?.worker ?? null);
@@ -56,6 +63,11 @@ export async function boot(): Promise<void> {
   try {
     const n = await nodeStatus();
     setNode(n);
+    try {
+      setAppVersion(await getVersion());
+    } catch {
+      setAppVersion(null);
+    }
     const c = await getConfig();
     // Older configs predate scanRoots; normalize so views can rely on it.
     if (!Array.isArray(c.scanRoots)) c.scanRoots = [];

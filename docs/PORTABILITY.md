@@ -93,8 +93,12 @@ found on `PATH`.
 
 - The Flatpak has never been built (missing vendor sources, no
   `flatpak-builder` run). The manifest is reviewed but unproven.
-- No real update has been served yet: needs the signing secret plus a
-  first `v*` tag, then an older install checking against it.
+- No real update has been *installed* yet: `v0.1.0` is published with
+  signed bundles and `latest.json`, but no older install has checked
+  against it. Needs a `v0.1.1+` tag, then check-for-updates from 0.1.0.
+- The window is frameless (`decorations: false`) with a custom titlebar.
+  Edge-resize on a frameless X11 window is compositor-dependent and was
+  never verified headless — confirm drag/resize on target setups.
 - A locally built AppImage inherits its host glibc — only the CI
   (ubuntu-22.04) bundles are redistributable to older distros.
 - `provision-stack.sh`'s `gh` path was never exercised live (no auth in
