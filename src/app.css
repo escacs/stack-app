@@ -3,7 +3,7 @@
    top bar, text buttons, inputs, chips, conflict callouts, op logs. */
 
 #shell { display: flex; flex-direction: column; min-height: calc(100vh - 92px); }
-#shell main { flex: 1 0 auto; }
+#shell main { flex: 1 0 auto; animation-fill-mode: backwards; }
 
 /* native feel: chrome is not text -------------------------------------- */
 html { overscroll-behavior: none; scroll-behavior: smooth; }

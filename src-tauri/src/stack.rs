@@ -733,7 +733,7 @@ fn probe_uncached() -> NodeStatus {
     failure
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn node_status() -> NodeStatus {
     probe_node_fresh()
 }
@@ -879,7 +879,7 @@ fn validation_error(path: &Path, git: bool, cli: bool, node: &NodeStatus) -> Opt
 
 /// Report where the stack checkout resolves from (never throws: unresolvable
 /// comes back as `{ path: null, source: "missing" }`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stack_location(stack_dir: Option<String>) -> StackLocation {
     match resolve_stack_dir(stack_dir.as_deref()) {
         Ok((path, source)) => StackLocation {
@@ -896,7 +896,7 @@ pub fn stack_location(stack_dir: Option<String>) -> StackLocation {
 /// First-run validation: the dir must be a git checkout with HEAD, contain
 /// `tools/stack/cli.mjs`, and node 22+ must be present. Anything missing
 /// yields `valid: false` with exactly one actionable `error`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_stack(stack_dir: Option<String>) -> StackReport {
     let node = probe_node_fresh();
     let (path, source) = match resolve_stack_dir(stack_dir.as_deref()) {
@@ -929,7 +929,7 @@ pub fn validate_stack(stack_dir: Option<String>) -> StackReport {
 
 /// Flat args (Tauri maps camelCase JS keys to these): invoke as
 /// `{ subcommand, args, projectDir, stackDir? }`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stack_run(
     subcommand: String,
     args: Option<Vec<String>>,

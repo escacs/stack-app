@@ -12,6 +12,19 @@ import {
   wheelPixels,
 } from './glide';
 
+describe('glideStep timing', () => {
+  it('closes the same share of the gap per second at any frame rate', () => {
+    let a = 0;
+    for (let i = 0; i < 60; i++) a = glideStep(a, 1000, 1000 / 60);
+    let b = 0;
+    for (let i = 0; i < 20; i++) b = glideStep(b, 1000, 1000 / 20);
+    expect(Math.abs(a - b)).toBeLessThan(2);
+  });
+  it('caps a long stall so one slow frame cannot teleport', () => {
+    expect(glideStep(0, 1000, 5000)).toBeCloseTo(glideStep(0, 1000, 100), 5);
+  });
+});
+
 describe('glideStep', () => {
   it('converges toward the target and snaps at the end', () => {
     let y = 0;

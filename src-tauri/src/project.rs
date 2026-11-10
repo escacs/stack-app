@@ -25,7 +25,7 @@ pub struct ProjectReport {
     pub errors: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_project(path: String) -> Result<ProjectReport, String> {
     let canon = match Path::new(&path).canonicalize() {
         Ok(p) => p,

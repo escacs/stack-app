@@ -283,12 +283,8 @@ export async function chooseWorker(name: string | null): Promise<void> {
   const c = config();
   if (!c) return;
   setActionError(null);
+  // Not saved (see persist): no IPC wait before the screen changes.
   const next = { ...c, worker: name };
-  const err = await persist('worker', next);
-  if (err) {
-    setActionError(err);
-    return;
-  }
   // A new answer to who always re-asks the project.
   setWhoDone(name !== null);
   setProjectDone(false);
@@ -320,11 +316,6 @@ export async function chooseProject(path: string | null): Promise<void> {
   setActionError(null);
   if (!path) {
     const next = { ...c, project: null };
-    const err = await persist('project', next);
-    if (err) {
-      setActionError(err);
-      return;
-    }
     setReport(null);
     setLock(emptyLock());
     setProjectDone(false);
@@ -337,11 +328,6 @@ export async function chooseProject(path: string | null): Promise<void> {
     return;
   }
   const next = { ...(config() ?? c), project: path };
-  const err = await persist('project', next);
-  if (err) {
-    setActionError(err);
-    return;
-  }
   // The bridge returns the saved config with the path added to recents. It
   // holds no user or project (neither is saved), so the session's own stay.
   const cfg = await addRecentProject(path).catch(() => next);

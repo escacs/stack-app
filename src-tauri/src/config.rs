@@ -36,7 +36,7 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
     let path = config_path(&app)?;
     match std::fs::read_to_string(&path) {
@@ -46,7 +46,7 @@ pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
     let mut config = config;
     config.recent_projects.truncate(MAX_RECENT);
@@ -59,7 +59,7 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
 }
 
 /// Prepend `path` to the recent-projects list (deduplicated, capped).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_recent_project(app: AppHandle, path: String) -> Result<AppConfig, String> {
     let mut config = get_config(app.clone())?;
     config.recent_projects.retain(|p| p != &path);

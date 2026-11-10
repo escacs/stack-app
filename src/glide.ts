@@ -8,16 +8,23 @@
 // html, so a plain `scrollTop = y` would start a new smooth animation every
 // frame, which lags behind the lerp and fights it.
 
+/** Fraction of the gap closed per frame at 60 fps. */
 const LERP = 0.18;
+const FRAME_MS = 1000 / 60;
 /** Pixels per wheel "line" (deltaMode 1, e.g. Firefox on Linux). */
 const LINE_PX = 16;
 /** Movement we did not make ourselves beyond this counts as external. */
 const EXTERNAL_TOLERANCE_PX = 1;
 
-/** One lerp step toward the target (snaps inside half a pixel). */
-export function glideStep(current: number, target: number): number {
+/**
+ * One lerp step toward the target (snaps inside half a pixel). `dt` is the
+ * time since the last step: the glide takes the same wall-clock time at 60
+ * or 20 fps instead of drifting on for seconds when frames are slow.
+ */
+export function glideStep(current: number, target: number, dt: number = FRAME_MS): number {
   if (!Number.isFinite(current) || !Number.isFinite(target)) return current;
-  const next = current + (target - current) * LERP;
+  const frames = Math.min(Math.max(dt, 1), 100) / FRAME_MS;
+  const next = current + (target - current) * (1 - Math.pow(1 - LERP, frames));
   return Math.abs(target - next) < 0.5 ? target : next;
 }
 
@@ -104,6 +111,7 @@ export function attachGlide(): () => void {
   // The pixel we last wrote (or rebased to). Anything else is external.
   let written = window.scrollY;
   let raf = 0;
+  let last = 0;
 
   const rebase = () => {
     pos = window.scrollY;
@@ -115,8 +123,10 @@ export function attachGlide(): () => void {
     raf = 0;
   };
 
-  const tick = () => {
+  const tick = (now: number) => {
     raf = 0;
+    const dt = last ? now - last : FRAME_MS;
+    last = now;
     const y = window.scrollY;
     if (isExternalScroll(y, written)) {
       // Someone else moved the page: abandon the glide from where it is now.
@@ -124,7 +134,7 @@ export function attachGlide(): () => void {
       return;
     }
     target = clampTarget(target, max());
-    pos = glideStep(pos, target);
+    pos = glideStep(pos, target, dt);
     const px = Math.round(pos);
     if (px !== y) {
       writeScroll(px);
@@ -151,7 +161,10 @@ export function attachGlide(): () => void {
     e.preventDefault();
     if (!raf || isExternalScroll(window.scrollY, written)) rebase();
     target = clampTarget(target + dy, max());
-    if (!raf) raf = requestAnimationFrame(tick);
+    if (!raf) {
+      last = 0;
+      raf = requestAnimationFrame(tick);
+    }
   };
 
   window.addEventListener('wheel', onWheel, { passive: false });

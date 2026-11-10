@@ -167,7 +167,7 @@ fn sort_and_cap(mut repos: Vec<ScanRepo>) -> (Vec<ScanRepo>, bool) {
 /// single `root`) win; with neither, the defaults are used (parent of the
 /// stack clone plus existing `~/Projects`, `~/dev`, `~/code`).
 /// `stack_dir` is only the settings override for resolving those defaults.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_projects(
     root: Option<String>,
     roots: Option<Vec<String>>,
@@ -224,7 +224,7 @@ pub fn scan_projects(
 }
 
 /// Report the default scan roots without scanning (for settings UI).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn default_scan_roots(stack_dir: Option<String>) -> ScanRoots {
     let (roots, stack) = default_roots(stack_dir.as_deref());
     ScanRoots {

@@ -217,8 +217,6 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   }
 
   onMount(() => {
-    // Dotted leaders, exactly like the web.
-    document.documentElement.style.setProperty('--dots', JSON.stringify('. '.repeat(120)));
     if (matchMedia('(hover: hover)').matches) inputEl?.focus();
 
     const onKey = (ev: KeyboardEvent) => {
