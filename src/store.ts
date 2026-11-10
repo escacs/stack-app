@@ -342,11 +342,12 @@ export async function chooseProject(path: string | null): Promise<void> {
     setActionError(err);
     return;
   }
-  // The bridge returns the saved config with the path added to recents.
+  // The bridge returns the saved config with the path added to recents. It
+  // holds no user or project (neither is saved), so the session's own stay.
   const cfg = await addRecentProject(path).catch(() => next);
   setReport(rep);
   setLock(emptyLock());
   setProjectDone(true);
-  setConfig({ ...cfg, project: path });
+  setConfig({ ...cfg, worker: next.worker, project: path });
   await refreshLock();
 }
