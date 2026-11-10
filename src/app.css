@@ -1,0 +1,84 @@
+/* stack app chrome. Shared look comes from web/style.css (imported in
+   index.tsx); this file only adds what the website has no use for:
+   top bar, text buttons, inputs, chips, conflict callouts, op logs. */
+
+#shell { display: flex; flex-direction: column; min-height: calc(100vh - 92px); }
+#shell main { flex: 1 0 auto; }
+
+/* top bar ------------------------------------------------------------ */
+#topbar {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 0 3ch; margin-bottom: 40px;
+}
+#topbar nav a.cur { color: var(--accent); }
+#topbar .sep { color: var(--ghost); margin: 0 1ch; }
+#topbar .switchers { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 2ch; }
+#topbar .node { color: var(--dim); }
+#topbar .node.bad { color: var(--accent); }
+.appfoot { padding-top: 48px; }
+
+/* text buttons, inputs ------------------------------------------------ */
+.btn, .linklike {
+  font: inherit; background: none; border: 0; padding: 0;
+  color: var(--accent); cursor: pointer; white-space: nowrap;
+}
+.btn::before { content: "["; color: var(--dim); }
+.btn::after { content: "]"; color: var(--dim); }
+.btn:hover, .linklike:hover { text-decoration: underline; text-underline-offset: 4px; }
+.btn:disabled { color: var(--dim); cursor: default; text-decoration: none; }
+.btn.danger { color: var(--fg); }
+.linklike { text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--dim); text-underline-offset: 4px; }
+
+input[type="text"], select {
+  font: inherit; color: var(--fg); background: transparent;
+  border: 0; border-bottom: 1px dotted var(--dim); border-radius: 0; padding: 0 0 1px;
+}
+input[type="text"]:focus, select:focus { outline: none; border-bottom-color: var(--accent); }
+input[type="text"]::placeholder { color: var(--ghost); }
+select { border-bottom-color: transparent; }
+select option { background: #000; }
+#prompt select { flex: none; }
+
+/* rows that are picked, not linked ------------------------------------ */
+.row.pick { cursor: default; }
+.row.pick:hover .nm { text-decoration: none; }
+.row.pick.cur .nm { color: var(--accent); }
+.row .btn { flex: none; }
+
+/* status rows ---------------------------------------------------------- */
+.statusrow { margin-bottom: 12px; }
+.statusrow .sub {
+  display: flex; flex-wrap: wrap; gap: 0 2ch; align-items: baseline;
+  padding-left: 2ch; font-size: 13px;
+}
+.statusrow .acts { margin-left: auto; display: flex; gap: 0 1ch; }
+
+.chip { flex: none; }
+.chip::before { content: "("; color: var(--dim); }
+.chip::after { content: ")"; color: var(--dim); }
+.chip.imported { color: var(--dim); }
+.chip.edited, .chip.update, .chip.gone { color: var(--accent); }
+
+/* op logs + conflicts --------------------------------------------------- */
+.oplog { margin-top: 16px; }
+.opsec p { margin: 12px 0 4px; }
+.opsec.conflict p::before { content: "! "; }
+.opsec.conflict .raw { color: var(--accent); }
+.conflict {
+  color: var(--accent); max-width: 76ch; overflow-wrap: anywhere;
+}
+.conflict::before { content: "! "; }
+
+/* git-state markers on catalog rows -------------------------------------- */
+.markers { display: inline-flex; flex: none; gap: 0 1ch; }
+.marker { color: var(--dim); font-size: 12px; white-space: nowrap; }
+.marker::before { content: "("; }
+.marker::after { content: ")"; }
+.marker.bad { color: var(--accent); }
+
+@media (max-width: 640px) {
+  #topbar .switchers { gap: 0 1.5ch; }
+  .statusrow .sub { padding-left: 0; }
+  .statusrow .acts { margin-left: 0; }
+  input[type="text"] { max-width: 100%; }
+}

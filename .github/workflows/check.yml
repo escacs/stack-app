@@ -1,0 +1,33 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:ui
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install webview deps
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y
+          libwebkit2gtk-4.1-dev build-essential curl wget file
+          libxdo-dev libssl-dev libayatana-appindicator3-dev
+          librsvg2-dev patchelf
+      # The e2e test skips itself without STACK_E2E_REPO (CI cannot reach
+      # the private escacs/stack checkout); this still compiles it and runs
+      # all Rust unit tests.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
