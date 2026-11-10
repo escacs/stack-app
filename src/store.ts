@@ -3,6 +3,7 @@
 // op results).
 import { createMemo, createSignal } from 'solid-js';
 import { getVersion } from '@tauri-apps/api/app';
+import { listen } from '@tauri-apps/api/event';
 import {
   addRecentProject,
   errText,
@@ -40,6 +41,9 @@ export const [stack, setStack] = createSignal<StackReport | null>(null);
 // Release version from tauri.conf (matches the GitHub release tag minus
 // the `v`). Null until boot resolves it (or when the bridge lacks it).
 export const [appVersion, setAppVersion] = createSignal<string | null>(null);
+// Newer release found by the startup check (event name must match
+// UPDATE_AVAILABLE_EVENT in src-tauri/src/lib.rs). Null when up to date.
+export const [appUpdate, setAppUpdate] = createSignal<string | null>(null);
 // First-run onboarding: set when the user continues past "who are you?"
 // without a worker (empty stack or failed list). Session-only.
 export const [workerSkipped, setWorkerSkipped] = createSignal(false);
@@ -67,6 +71,13 @@ export async function boot(): Promise<void> {
       setAppVersion(await getVersion());
     } catch {
       setAppVersion(null);
+    }
+    try {
+      await listen<{ version: string }>('stack://update-available', (e) => {
+        setAppUpdate(e.payload.version);
+      });
+    } catch {
+      // Plain-browser fixture has no event bridge; the badge just never fires.
     }
     const c = await getConfig();
     // Older configs predate scanRoots; normalize so views can rely on it.

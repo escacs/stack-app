@@ -93,9 +93,11 @@ found on `PATH`.
 
 - The Flatpak has never been built (missing vendor sources, no
   `flatpak-builder` run). The manifest is reviewed but unproven.
-- No real update has been *installed* yet: `v0.1.0` is published with
-  signed bundles and `latest.json`, but no older install has checked
-  against it. Needs a `v0.1.1+` tag, then check-for-updates from 0.1.0.
+- No real update has been *installed* yet: `v0.1.1` is published with
+  signed bundles and `latest.json`, and the 404 that blocked checks is
+  gone (repo is public), but no older install has checked, downloaded and
+  relaunched yet. Needs: install the 0.1.1 AppImage, tag `v0.1.2`, then
+  check-for-updates from settings and confirm the relaunch.
 - The window is frameless (`decorations: false`) with a custom titlebar.
   Edge-resize on a frameless X11 window is compositor-dependent and was
   never verified headless — confirm drag/resize on target setups.

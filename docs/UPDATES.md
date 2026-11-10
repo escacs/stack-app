@@ -14,6 +14,10 @@ plus `@tauri-apps/plugin-process 2.4.0` for relaunch).
 - The app polls
   `https://github.com/escacs/stack-app/releases/latest/download/latest.json`
   (see `plugins.updater` in `src-tauri/tauri.conf.json`).
+- That endpoint fetches without credentials, so the repo must stay public
+  (or the URL otherwise reachable without auth). Flipping the repo private
+  makes every update check 404: the startup check logs it to stderr and the
+  settings check shows it verbatim, but no install will ever see an update.
 - Every artifact is signed at build time with the secret key whose public
   half is baked into `tauri.conf.json` as `plugins.updater.pubkey`. The app
   verifies that signature before installing anything.
@@ -22,22 +26,35 @@ plus `@tauri-apps/plugin-process 2.4.0` for relaunch).
   flow lives in the settings view (`src/views/Project.tsx`, helpers in
   `src/updater.ts`): check for updates, download & install with progress,
   then relaunch. Errors are shown verbatim.
-- On Linux the self-update path ships through the AppImage bundle; deb and
-  rpm stay available on the release page as manual downloads.
+- On Linux the supported self-update path is the AppImage bundle (the new
+  file replaces the old one). `latest.json` also carries `deb` and `rpm`
+  entries, and a deb/rpm-installed copy will try to self-update through
+  them by running `dpkg -i` / `rpm -U` as the app user — which needs root
+  and is untested. Prefer the AppImage for self-updating installs; treat
+  deb and rpm as manual downloads from the release page.
 - Dev builds (`tauri dev`) can check but have nothing to update in place;
   only installed bundles self-update.
 
 ## Cutting a release
 
-One-time setup first: the private key file is
-`/tmp/stack-app-updater.key` (generated with an **empty** password via
-`npx tauri signer generate`). Back it up somewhere safe (password manager
-or encrypted backup) — losing it means existing installs can never verify
-a new artifact again (see rotation below). Then store it as a repo secret:
+One-time setup first: generate the signing key **outside** `/tmp` (it is
+tmpfs here and a reboot deletes it) with an **empty** password — that is a
+known trade-off: whoever reads the file can sign releases, so its safety
+is the safety of wherever you keep it:
 
 ```sh
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo escacs/stack-app < /tmp/stack-app-updater.key
+npx tauri signer generate -w ~/stack-app-updater.key --ci
+```
+
+Back the key up to a password manager or encrypted backup **before**
+anything else — the GitHub secret below is write-only, so a lost key
+means existing installs can never verify a new artifact again (see
+rotation). Then store it as a repo secret and shred the local copy:
+
+```sh
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo escacs/stack-app < ~/stack-app-updater.key
 gh secret list --repo escacs/stack-app
+shred -u ~/stack-app-updater.key ~/stack-app-updater.key.pub
 ```
 
 No `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is needed (empty password). To test
@@ -62,10 +79,11 @@ Installed apps verify new artifacts with the public key baked into them at
 build time, so a rotated key is not trusted by existing installs: rotation
 forces one manual reinstall for every user. Steps:
 
-1. `npx tauri signer generate -w /tmp/stack-app-updater-new.key --password "" --ci`
+1. `npx tauri signer generate -w ~/stack-app-updater-new.key --password "" --ci`
 2. Replace `plugins.updater.pubkey` in `src-tauri/tauri.conf.json` with the
-   contents of `/tmp/stack-app-updater-new.key.pub`.
-3. `gh secret set TAURI_SIGNING_PRIVATE_KEY --repo escacs/stack-app < /tmp/stack-app-updater-new.key`
-4. Back up the new private key, delete the `/tmp` copies, cut a release as
-   above, and tell users to download that one by hand. Self-updates resume
-   from the release after.
+   contents of `~/stack-app-updater-new.key.pub`.
+3. Back the new key up to a password manager first, then
+   `gh secret set TAURI_SIGNING_PRIVATE_KEY --repo escacs/stack-app < ~/stack-app-updater-new.key`
+4. Shred the local copies (`shred -u ~/stack-app-updater-new.key*`), cut a
+   release as above, and tell users to download that one by hand.
+   Self-updates resume from the release after.

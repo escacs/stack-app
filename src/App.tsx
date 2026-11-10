@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup } from 'solid-js';
-import { appVersion, boot, bootError, config, lock, node, stack, workerSkipped } from './store';
+import { appUpdate, appVersion, boot, bootError, config, lock, node, stack, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash } from './router';
 import TitleBar from './views/TitleBar';
@@ -79,6 +79,14 @@ export default function App() {
           <span class="dimtxt">
             <Show when={appVersion()} fallback="?">
               {(v) => <span>{v()}</span>}
+            </Show>
+            <Show when={appUpdate()}>
+              {(v) => (
+                <span>
+                  {' → '}
+                  <a href={href(hash().scenario, 'project')}>{v()} available</a>
+                </span>
+              )}
             </Show>
             {' · '}
             <Show

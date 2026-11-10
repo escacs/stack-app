@@ -14,6 +14,7 @@
 //! it; Rust normalizes both.
 
 use serde::Serialize;
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -401,8 +402,54 @@ pub struct NodeStatus {
     pub error: Option<String>,
 }
 
+/// `LD_LIBRARY_PATH` with `$APPDIR` entries removed, or `None` when nothing
+/// remains. Pure so tests can pin it without touching the process env.
+fn strip_appdir_lib_paths(libpath: &OsStr, appdir: &OsStr) -> Option<OsString> {
+    let kept: Vec<_> = std::env::split_paths(libpath)
+        .filter(|p| !p.starts_with(appdir))
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        std::env::join_paths(kept).ok()
+    }
+}
+
+/// Drop AppImage-bundled library dirs from a child command's env. The
+/// AppImage runtime prepends `$APPDIR/usr/lib...` to `LD_LIBRARY_PATH`, and
+/// a system `node` spawned with it dies in the loader (bundled libffi and
+/// friends shadow the system ones) with empty stdout — which used to
+/// surface as "could not parse the node version". Only `$APPDIR` entries
+/// go; user-set paths survive, and non-AppImage runs (no `$APPDIR`) keep
+/// their env untouched.
+fn unpoison_env(cmd: &mut Command) {
+    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
+    let libpath = std::env::var_os("LD_LIBRARY_PATH");
+    unpoison_env_with(cmd, &appdir, libpath.as_deref());
+}
+
+fn unpoison_env_with(cmd: &mut Command, appdir: &OsStr, libpath: Option<&OsStr>) {
+    if appdir.is_empty() {
+        return;
+    }
+    let Some(libpath) = libpath else {
+        return;
+    };
+    match strip_appdir_lib_paths(libpath, appdir) {
+        Some(joined) => {
+            cmd.env("LD_LIBRARY_PATH", joined);
+        }
+        None => {
+            cmd.env_remove("LD_LIBRARY_PATH");
+        }
+    }
+}
+
 pub fn probe_node() -> NodeStatus {
-    let out = match Command::new("node").arg("--version").output() {
+    let mut cmd = Command::new("node");
+    cmd.arg("--version");
+    unpoison_env(&mut cmd);
+    let out = match cmd.output() {
         Ok(o) => o,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return NodeStatus {
@@ -448,12 +495,22 @@ pub fn probe_node() -> NodeStatus {
                 "node 22+ is required, found {raw}. Install a newer Node.js (https://nodejs.org), then relaunch the app."
             )),
         },
-        None => NodeStatus {
-            ok: false,
-            version: Some(raw),
-            major: None,
-            error: Some("could not parse the node version; need node 22+".to_string()),
-        },
+        None => {
+            let head: String = raw.chars().take(60).collect();
+            let shown = if head.len() < raw.len() {
+                format!("{head}…")
+            } else {
+                head
+            };
+            NodeStatus {
+                ok: false,
+                version: Some(raw),
+                major: None,
+                error: Some(format!(
+                    "could not parse the node version ({shown:?}); need node 22+"
+                )),
+            }
+        }
     }
 }
 
@@ -682,6 +739,7 @@ pub fn run_stack(
         return Err("tools/stack/cli.mjs is missing in the stack directory".to_string());
     }
     let mut cmd = Command::new("node");
+    unpoison_env(&mut cmd);
     cmd.arg(&cli)
         .arg(subcommand)
         .args(&argv.flags)
@@ -1139,5 +1197,54 @@ mod tests {
         assert!(err.contains(&p.display().to_string()));
         assert!(err.contains("settings"));
         let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn strip_appdir_lib_paths_keeps_user_entries() {
+        let appdir = OsStr::new("/tmp/.mount_StackAbC123");
+        let lib =
+            OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/opt/mine/lib:/tmp/.mount_StackAbC123/lib");
+        assert_eq!(
+            strip_appdir_lib_paths(lib, appdir).as_deref(),
+            Some(OsStr::new("/opt/mine/lib"))
+        );
+    }
+
+    #[test]
+    fn strip_appdir_lib_paths_none_when_all_bundled() {
+        let appdir = OsStr::new("/tmp/.mount_StackAbC123");
+        let lib = OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/tmp/.mount_StackAbC123/lib");
+        assert_eq!(strip_appdir_lib_paths(lib, appdir), None);
+    }
+
+    #[test]
+    fn unpoison_env_with_sets_or_removes() {
+        let appdir = OsStr::new("/tmp/.mount_StackAbC123");
+        let mut cmd = Command::new("node");
+        unpoison_env_with(
+            &mut cmd,
+            appdir,
+            Some(OsStr::new("/tmp/.mount_StackAbC123/usr/lib:/opt/mine/lib")),
+        );
+        let envs: Vec<_> = cmd.get_envs().collect();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].0, OsStr::new("LD_LIBRARY_PATH"));
+        assert_eq!(envs[0].1, Some(OsStr::new("/opt/mine/lib")));
+
+        let mut bare = Command::new("node");
+        unpoison_env_with(
+            &mut bare,
+            appdir,
+            Some(OsStr::new("/tmp/.mount_StackAbC123/usr/lib")),
+        );
+        let envs: Vec<_> = bare.get_envs().collect();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].0, OsStr::new("LD_LIBRARY_PATH"));
+        assert_eq!(envs[0].1, None);
+
+        // No APPDIR (dev runs, deb/rpm installs): env untouched.
+        let mut plain = Command::new("node");
+        unpoison_env_with(&mut plain, OsStr::new(""), Some(OsStr::new("/opt/mine/lib")));
+        assert_eq!(plain.get_envs().count(), 0);
     }
 }

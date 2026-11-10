@@ -68,8 +68,22 @@ fn fixture_stack(base: &Path) -> PathBuf {
         .expect("STACK_E2E_REPO must point at an escacs/stack checkout");
     let repo = base.join("stack");
     std::fs::create_dir_all(repo.join("tools").join("stack")).unwrap();
-    for name in ["cli.mjs", "imports.mjs", "gitignore.mjs", "toml.mjs"] {
-        let bytes = std::fs::read(real.join("tools").join("stack").join(name))
+    // Every runtime module, not a fixed list: the CLI grows new siblings
+    // (agentsmd, presets, ...) and a stale list breaks the fixture with
+    // ERR_MODULE_NOT_FOUND. Test files stay out.
+    let mut names: Vec<_> = std::fs::read_dir(real.join("tools").join("stack"))
+        .expect("read real CLI dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".mjs") && !n.ends_with(".test.mjs"))
+        .collect();
+    names.sort();
+    assert!(
+        names.contains(&"cli.mjs".to_string()),
+        "fixture needs the real cli.mjs"
+    );
+    for name in names {
+        let bytes = std::fs::read(real.join("tools").join("stack").join(&name))
             .expect("read real CLI file");
         std::fs::write(repo.join("tools").join("stack").join(name), bytes).unwrap();
     }

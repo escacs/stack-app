@@ -24,8 +24,28 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      # The updater compares the tag against the baked-in version, so a
+      # mismatch ships a release no install will ever pick up. Fail fast.
+      - name: check tag matches versions
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys
+          tag = __import__('os').environ['GITHUB_REF_NAME']
+          want = tag[1:] if tag.startswith('v') else tag
+          pkg = json.load(open('package.json'))['version']
+          conf = json.load(open('src-tauri/tauri.conf.json'))['version']
+          toml = re.search(r'^version = "([^"]+)"', open('src-tauri/Cargo.toml').read(), re.M).group(1)
+          bad = [(n, v) for n, v in [('package.json', pkg), ('tauri.conf.json', conf), ('Cargo.toml', toml)] if v != want]
+          if bad:
+              print(f'tag {tag} but ' + ', '.join(f'{n} is {v}' for n, v in bad))
+              sys.exit(1)
+          print(f'versions match {tag}')
+          EOF
       - run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned: this job holds TAURI_SIGNING_PRIVATE_KEY, so its third-party
+      # steps must not move under us. Refresh with:
+      #   gh api repos/dtolnay/rust-toolchain/commits/stable --jq .sha
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: install webview deps
         run: >
           sudo apt-get update &&
@@ -33,10 +53,19 @@ jobs:
           libwebkit2gtk-4.1-dev build-essential curl wget file
           libxdo-dev libssl-dev libayatana-appindicator3-dev
           librsvg2-dev patchelf
+      # Typecheck + tests before anything is signed: a red tree must never
+      # become the "latest" release every install polls.
+      - name: typecheck and test
+        run: |
+          npm run check
+          npm run test:ui
+          cargo test --manifest-path src-tauri/Cargo.toml
       # Builds the deb/rpm/appimage bundles plus the updater artifacts
       # (.sig files and latest.json) and creates the GitHub release with
       # everything attached. The app polls latest.json for updates.
-      - uses: tauri-apps/tauri-action@v0
+      # Pinned (see above); refresh with:
+      #   gh api repos/tauri-apps/tauri-action/commits/v0 --jq .sha
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

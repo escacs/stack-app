@@ -12,8 +12,19 @@ pub mod project;
 pub mod scan;
 pub mod stack;
 
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
+
+/// Event the startup check emits when a newer release exists. The frontend
+/// listens for it (see `appUpdate` in src/store.ts) to badge the footer.
+/// Keep the name in sync on both sides.
+pub const UPDATE_AVAILABLE_EVENT: &str = "stack://update-available";
+
+/// Payload for [`UPDATE_AVAILABLE_EVENT`], kept pure for tests.
+pub fn update_available_payload(version: &str) -> serde_json::Value {
+    serde_json::json!({ "version": version })
+}
 
 /// Native folder picker. Runs on a blocking thread so the webview stays
 /// responsive while the dialog is open. Returns `None` on cancel.
@@ -36,13 +47,30 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // Silent, non-blocking update check at startup. The result is
-            // deliberately ignored here; the settings view offers a manual
-            // check plus download/install/relaunch with progress.
+            // Non-blocking update check at startup. Failures go to stderr
+            // (a 404 here once meant the releases page was unreachable, and
+            // swallowing it hid that for a whole release); a newer release
+            // emits UPDATE_AVAILABLE_EVENT for the footer badge. The settings
+            // view offers a manual check plus download/install/relaunch.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(updater) = handle.updater() {
-                    let _ = updater.check().await;
+                let updater = match handle.updater() {
+                    Ok(u) => u,
+                    Err(e) => {
+                        eprintln!("stack: startup update check unavailable: {e}");
+                        return;
+                    }
+                };
+                match updater.check().await {
+                    Ok(Some(update)) => {
+                        eprintln!("stack: update available: {}", update.version);
+                        let _ = handle.emit(
+                            UPDATE_AVAILABLE_EVENT,
+                            update_available_payload(&update.version),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("stack: startup update check failed: {e}"),
                 }
             });
             Ok(())
@@ -62,4 +90,18 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running the stack app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_available_event_shape() {
+        assert_eq!(UPDATE_AVAILABLE_EVENT, "stack://update-available");
+        assert_eq!(
+            update_available_payload("0.1.2"),
+            serde_json::json!({ "version": "0.1.2" })
+        );
+    }
 }
