@@ -50,12 +50,20 @@ export type CrumbTarget = { to: 'home' } | { to: 'kind'; kindSingular: string } 
 export type CrumbPart = { label: string; target: CrumbTarget | null };
 
 /**
+ * The one catalog Browse shows today: the stack checkout's entries. Kept as
+ * a named constant — heads the crumb trail — so a second catalog later only
+ * adds a picker where this name sits. No multi-catalog support yet.
+ */
+export const CATALOG_NAME = 'stack';
+
+/**
  * Breadcrumb parts for the prompt line. The separator supplies the slash, so
- * labels carry none. An entry's trail is its kind, then the id tail below the
- * kind (`react/button`), then the file, so nested ids read like their path.
+ * labels carry none. The trail starts at the catalog name, then for an entry
+ * its kind, the id tail below the kind (`react/button`), then the file, so
+ * nested ids read like their path.
  */
 export function crumbParts(r: Route, searching: boolean): CrumbPart[] {
-  const home: CrumbPart = { label: '~', target: searching || r.kind !== 'home' ? { to: 'home' } : null };
+  const home: CrumbPart = { label: CATALOG_NAME, target: searching || r.kind !== 'home' ? { to: 'home' } : null };
   if (searching || r.kind === 'home') return [home];
   if (r.kind === 'all') return [home, { label: 'all', target: null }];
   if (r.kind === 'kind') return [home, { label: pluralOf(r.kindSingular), target: null }];

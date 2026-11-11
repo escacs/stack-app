@@ -1,9 +1,23 @@
 // Hash routing. The mock bridge reads its scenario from the same hash, so
 // both share one shape: `#<scenario>,<route…>` — e.g. `#populated,/browse`
-// or `#conflicts,/installed`. A bare `#empty` (or no hash) means
-// scenario-only with the default (browse) route; a bare `#/browse` means
+// or `#conflicts,/project`. A bare `#empty` (or no hash) means
+// scenario-only with the default (project) route; a bare `#/browse` means
 // route-only.
 export type Hash = { scenario: string; segs: string[] };
+
+/** Top-level view: the project page, the browse catalog, or no such route. */
+export type View = 'project' | 'browse' | 'missing';
+
+/**
+ * Map route segments onto a view. `installed` is the old project-page route
+ * and stays working as an alias so old links don't break.
+ */
+export function resolveView(segs: string[]): View {
+  const v = segs[0] ?? '';
+  if (v === '' || v === 'project' || v === 'installed') return 'project';
+  if (v === 'browse') return 'browse';
+  return 'missing';
+}
 
 export const DEFAULT_SCENARIO = 'populated';
 

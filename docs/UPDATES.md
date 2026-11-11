@@ -23,7 +23,7 @@ plus `@tauri-apps/plugin-process 2.4.0` for relaunch).
   verifies that signature before installing anything.
 - At startup the shell does one silent, non-blocking update check
   (`src-tauri/src/lib.rs` setup hook) and ignores the result. The manual
-  flow lives at the bottom of the `installed` view (`src/views/Updates.tsx`,
+  flow lives in the footer `settings` (`src/views/Updates.tsx`,
   helpers in `src/updater.ts`): check for updates, download & install with progress,
   then relaunch. Errors are shown verbatim.
 - On Linux the supported self-update path is the AppImage bundle (the new

@@ -147,6 +147,8 @@ export type PresetApplyJson = {
   command: 'preset';
   action: 'apply';
   preset: string;
+  /** Dry-run only: true when nothing was written. Absent on a real apply. */
+  dryRun?: boolean;
   commit: string;
   imported: { id: string; path: string; requiredBy?: string }[];
   already: string[];
@@ -417,6 +419,39 @@ export function describePresetApply(r: PresetApplyJson): OpSection[] {
   const idle = secs.findIndex((s) => s.title === 'nothing to do');
   if (idle >= 0) secs[idle] = sec;
   else secs.unshift(sec);
+  return secs;
+}
+
+/**
+ * Render a preset dry-run (`preset apply <name> --dry-run --json`) as
+ * display sections: what would land where, what is already imported, and —
+ * first, in a bad tone — what would collide. No title ever claims a write.
+ */
+export function describePresetPreview(r: PresetApplyJson): OpSection[] {
+  const secs: OpSection[] = [];
+  const conflicts = r.conflicts ?? [];
+  if (conflicts.length) {
+    secs.push({
+      title: 'would collide (dry run, nothing written)',
+      lines: [...conflicts],
+      tone: 'bad',
+    });
+  }
+  if (r.imported.length) {
+    secs.push({
+      title: `would import ${plural(r.imported.length, 'entry', 'entries')}`,
+      lines: r.imported.map((p) =>
+        `${p.id} → ${p.path}${p.requiredBy ? ` (required by ${p.requiredBy})` : ''}`,
+      ),
+    });
+  }
+  if (r.already.length) secs.push({ title: 'already here', lines: [...r.already], tone: 'dim' });
+  if (r.gitignore === 'updated') {
+    secs.push({ title: '.gitignore', lines: ['managed escacs block would update'], tone: 'dim' });
+  }
+  if (!secs.length) {
+    secs.push({ title: 'nothing new: everything already here', lines: [], tone: 'dim' });
+  }
   return secs;
 }
 

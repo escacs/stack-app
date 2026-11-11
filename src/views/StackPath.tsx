@@ -1,6 +1,7 @@
 // Stack line: which escacs/stack checkout imports come from. `change` picks a
 // folder (saved as the settings override); `auto` clears it back to the
-// automatic lookup. An invalid stack never gets here (StackSetup blocks it).
+// automatic lookup. Lives in the footer settings: it is about the app, not
+// the project. An invalid stack never gets here (StackSetup blocks it).
 import { Show, createSignal } from 'solid-js';
 import { errText } from '../bridge';
 import { chooseStackPath, clearStackPath, config, stack } from '../store';

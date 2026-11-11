@@ -1,9 +1,10 @@
-// Installed: this project's imports (update, remove, sync, init, adopt),
-// presets, then the stack checkout and app version. One op runs at a time;
-// the lock is re-read after every op, failed or not, so the rows never lag
-// what the CLI last did. Update merges or leaves <<<<<<< markers, remove
-// keeps edited files, sync only restores missing files, adopt never
-// overwrites.
+// Project page: everything about the open project — the set-up slot, this
+// project's imports (update, remove, sync, adopt), then presets. App-wide
+// settings (stack checkout, app version) live in the footer, not here. One
+// op runs at a time; the lock is re-read after every op, failed or not, so
+// the rows never lag what the CLI last did. Update merges or leaves
+// <<<<<<< markers, remove keeps edited files, sync only restores missing
+// files, adopt never overwrites.
 import { For, Show, createEffect, createSignal, on, onMount } from 'solid-js';
 import { errText, stackRun, type StackOut } from '../bridge';
 import {
@@ -30,8 +31,6 @@ import { href } from '../router';
 import { config, lock, lockError, refreshLock, refreshReport, report } from '../store';
 import { Chip, CliErr, Empty, OpResult } from '../ui';
 import { Presets, presetKey } from './Presets';
-import { StackPath } from './StackPath';
-import { Updates } from './Updates';
 
 // One stack command. `key` names the control that shows `working` while it
 // runs (every other control is disabled); `label` heads its output.
@@ -47,7 +46,7 @@ function decode<T>(describe: (j: T) => OpSection[]): (out: StackOut) => OpSectio
   return (out) => describe(fromStackOut<T>(out));
 }
 
-export default function Status(props: { scenario: string }) {
+export default function Project(props: { scenario: string }) {
   const [sections, setSections] = createSignal<OpSection[] | null>(null);
   const [failed, setFailed] = createSignal<string | null>(null);
   const [logLabel, setLogLabel] = createSignal('');
@@ -190,7 +189,28 @@ export default function Status(props: { scenario: string }) {
         <Show when={lockError()}>
           {(e) => <CliErr text={e()} />}
         </Show>
-        <Show when={lock().rows.length} fallback={<Show when={!lockError()}><Empty>(._.) nothing imported</Empty></Show>}>
+        {/*
+          Set-up slot. Until per-worker setup lands (part B of #1, waiting on
+          escacs/stack#14 worker preselect and #15 `init --worker`), a project
+          without stack.toml gets the plain init action here, at the top, with
+          a one-line explanation. Part B replaces this block with: working-as
+          pick, start-from preset choice, preview, then `init --worker`.
+        */}
+        <Show when={needsInit()}>
+          <h2>set up</h2>
+          <p class="dimtxt">no stack.toml here yet — init creates it so imports have somewhere to live.</p>
+          <p>
+            <button
+              class="btn"
+              title="creates stack.toml plus the managed .gitignore block; migrates a legacy stack.lock.json"
+              disabled={!!pending()}
+              onClick={() => void run(init)}
+            >
+              {busyText('init', 'init stack.toml')}
+            </button>
+          </p>
+        </Show>
+        <Show when={lock().rows.length} fallback={<Show when={!lockError() && !needsInit()}><Empty>(._.) nothing imported</Empty></Show>}>
           <div class="rows">
             <For each={lock().rows}>
               {(r) => {
@@ -265,19 +285,6 @@ export default function Status(props: { scenario: string }) {
           </p>
         </Show>
 
-        <Show when={needsInit()}>
-          <p>
-            <button
-              class="btn"
-              title="creates stack.toml plus the managed .gitignore block; migrates a legacy stack.lock.json"
-              disabled={!!pending()}
-              onClick={() => void run(init)}
-            >
-              {busyText('init', 'init stack.toml')}
-            </button>
-          </p>
-        </Show>
-
         <Show when={failed()}>
           <h2>{logLabel()}</h2>
           <Show
@@ -339,9 +346,6 @@ export default function Status(props: { scenario: string }) {
         </Show>
 
         <Presets pending={pending()} onApply={(name) => void run(preset(name))} />
-
-        <StackPath />
-        <Updates />
       </Show>
     </div>
   );

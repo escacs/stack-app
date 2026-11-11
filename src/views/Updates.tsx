@@ -1,6 +1,7 @@
 // App line: running version, a manual update check, then install with
 // progress and relaunch. A newer build found by the startup check is offered
-// here too (the footer links to this line). Errors surface verbatim.
+// here too. Lives in the footer settings, not on the project page: it is
+// about the app, not the project. Errors surface verbatim.
 import { Show, createSignal } from 'solid-js';
 import { errText } from '../bridge';
 import { fmtBytes } from '../parse';

@@ -7,6 +7,7 @@ import {
   describeImport,
   describeInit,
   describePresetApply,
+  describePresetPreview,
   describeRemove,
   describeSync,
   describeUpdate,
@@ -486,6 +487,56 @@ describe('describePresetApply', () => {
     const secs = describePresetApply({ ...base, imported: [], already: [], conflicts: ['x'] });
     expect(secs).toHaveLength(1);
     expect(secs[0].tone).toBe('bad');
+  });
+});
+
+describe('describePresetPreview', () => {
+  // Shape verified against the real CLI: `preset apply react-app --dry-run
+  // --json` returns PresetApplyJson plus dryRun:true, with `imported` naming
+  // what would land where and `already` naming what is already imported.
+  const dryRun: PresetApplyJson = {
+    command: 'preset',
+    action: 'apply',
+    preset: 'react-app',
+    dryRun: true,
+    commit: 'c',
+    imported: [
+      { id: 'templates/react-vite-tooling', path: '.' },
+      { id: 'components/base/button', path: 'src/components/button', requiredBy: 'x' },
+    ],
+    already: ['libraries/tailwindcss'],
+    conflicts: [],
+    gitignore: 'unchanged',
+  };
+
+  it('lists what would land where and what is already imported', () => {
+    const secs = describePresetPreview(dryRun);
+    expect(secs[0].title).toBe('would import 2 entries');
+    expect(secs[0].lines).toEqual([
+      'templates/react-vite-tooling → .',
+      'components/base/button → src/components/button (required by x)',
+    ]);
+    expect(secs[1]).toEqual({ title: 'already here', lines: ['libraries/tailwindcss'], tone: 'dim' });
+  });
+
+  it('leads with collisions in a bad tone and never claims a write', () => {
+    const secs = describePresetPreview({ ...dryRun, conflicts: ['src/x.md'] });
+    expect(secs[0].tone).toBe('bad');
+    expect(secs[0].title).toContain('would collide');
+    expect(secs[0].lines).toEqual(['src/x.md']);
+    for (const s of secs) expect(s.title).not.toMatch(/^imported /);
+  });
+
+  it('reports the quiet case and the gitignore touch', () => {
+    expect(describePresetPreview({ ...dryRun, imported: [], already: [] })).toEqual([
+      { title: 'nothing new: everything already here', lines: [], tone: 'dim' },
+    ]);
+    const secs = describePresetPreview({ ...dryRun, gitignore: 'updated' });
+    expect(secs.at(-1)).toEqual({
+      title: '.gitignore',
+      lines: ['managed escacs block would update'],
+      tone: 'dim',
+    });
   });
 });
 
