@@ -335,6 +335,8 @@ export async function chooseProject(path: string | null): Promise<void> {
   // The bridge returns the saved config with the path added to recents. It
   // holds no user or project (neither is saved), so the session's own stay.
   const cfg = await addRecentProject(path).catch(() => next);
+  // A mid-session config reset surfaces its notice here, as at boot.
+  setConfigNotice(cfg.notice ?? null);
   setReport(rep);
   setLock(emptyLock());
   setProjectDone(true);
