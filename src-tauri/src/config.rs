@@ -94,12 +94,15 @@ fn write_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
     let text =
         serde_json::to_string_pretty(&config).map_err(|e| format!("encode config: {e}"))?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("write config: {e}"))?;
+    // A failed write or rename removes the temp file; the previous
+    // config.json is never touched, so it stays intact on every error.
+    if let Err(e) = std::fs::write(&tmp, &text) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("write config: {e}"));
+    }
     if let Err(e) = std::fs::rename(&tmp, path) {
-        // Some platforms refuse to rename over an existing file; retry once
-        // without it rather than leaving a stray temp file behind.
-        std::fs::remove_file(path).map_err(|_| format!("write config: {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("write config: {e}"))?;
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("write config: {e}"));
     }
     Ok(())
 }
