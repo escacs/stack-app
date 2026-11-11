@@ -226,6 +226,7 @@
     scanRoots: [],
     worker: 'mel',
     project: null,
+    notice: null,
   };
 
   const cleanLock = () => ([

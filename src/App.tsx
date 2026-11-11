@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
-import { actionError, appUpdate, appVersion, boot, bootError, config, lock, projectDone, stack, whoDone, workerSkipped } from './store';
+import { actionError, appUpdate, appVersion, boot, bootError, config, configNotice, lock, projectDone, stack, whoDone, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash } from './router';
 import TitleBar from './views/TitleBar';
@@ -42,6 +42,9 @@ export default function App() {
         </Show>
         <Show when={actionError()}>
           <p class="conflict" role="alert">{actionError()}</p>
+        </Show>
+        <Show when={configNotice()}>
+          <p class="empty">{configNotice()}</p>
         </Show>
         <Show when={!config() && !bootError()}>
           <p class="empty">(._.) starting…</p>
