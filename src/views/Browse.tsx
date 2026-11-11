@@ -40,7 +40,7 @@ import {
   type ShowFileJson,
   type ShowJson,
 } from '../json';
-import { config, lock, refreshLock } from '../store';
+import { config, lock, refreshLock, refreshReport } from '../store';
 import { CliErr, Empty, Markers, OpResult } from '../ui';
 import {
   catalogs,
@@ -724,6 +724,9 @@ function EntryDetail(props: {
       const out = await stackRun('import', importArgs(props.id, dest), c.project, c.stackPath);
       setSections(describeImport(fromStackOut(out)));
       await refreshLock();
+      // Import creates stack.toml implicitly: the project page's set-up slot
+      // must re-check on the next visit.
+      await refreshReport();
       props.onImported();
     } catch (err) {
       setFailed(errText(err));
@@ -856,7 +859,14 @@ function EntryDetail(props: {
                 <CliErr text={failed() as string} />
               </Show>
               <Show when={sections()}>
-                {(s) => <OpResult sections={s()} />}
+                {(s) => (
+                  <>
+                    <OpResult sections={s()} />
+                    <p class="dimtxt">
+                      <a href={href(props.scenario, 'project')}>→ project</a>
+                    </p>
+                  </>
+                )}
               </Show>
 
               <Show when={previews().length}>

@@ -51,6 +51,9 @@ export default function Project(props: { scenario: string }) {
   const [failed, setFailed] = createSignal<string | null>(null);
   const [logLabel, setLogLabel] = createSignal('');
   const [pending, setPending] = createSignal<string | null>(null);
+  // Op sequence, bumped on every op start: a preset preview that resolves
+  // after the bump names pre-op lock state and must be dropped, not shown.
+  const [opSeq, setOpSeq] = createSignal(0);
   const [lookalikes, setLookalikes] = createSignal<string[]>([]);
   const [adoptOpen, setAdoptOpen] = createSignal(false);
   const [adoptId, setAdoptId] = createSignal('');
@@ -80,23 +83,31 @@ export default function Project(props: { scenario: string }) {
     setLogLabel('');
   }
 
-  async function run(op: Op) {
+  async function run(op: Op): Promise<boolean> {
     const c = config();
-    if (!c?.project || pending()) return;
+    if (!c?.project || pending()) return false;
     setPending(op.key);
+    setOpSeq((n) => n + 1);
     clearOutput();
     try {
       const out = await stackRun(op.sub, op.args, c.project, c.stackPath);
       setLogLabel(op.label);
       setSections(op.describe(out));
+      return true;
     } catch (err) {
       const text = errText(err);
       setLogLabel(op.label);
       setFailed(text);
-      if (op.sub === 'import') setLookalikes(refusalFiles(text));
+      // Preset apply runs through the same import plan as import, so its
+      // collisions print the same "already exist with other content" text.
+      if (op.sub === 'import' || op.sub === 'preset') setLookalikes(refusalFiles(text));
+      return false;
     } finally {
       await refreshLock();
-      if (op.sub === 'init') await refreshReport();
+      // Import, adopt (an import) and preset apply create stack.toml
+      // implicitly, so the set-up slot must re-check after them, not just
+      // after init.
+      if (op.sub === 'init' || op.sub === 'import' || op.sub === 'preset') await refreshReport();
       setPending(null);
     }
   }
@@ -171,12 +182,20 @@ export default function Project(props: { scenario: string }) {
   function submitAdopt() {
     const id = adoptId().trim();
     if (!id || pending()) return;
+    // On success the form closes cleared, leaving the shared output above;
+    // on failure it stays open so the id can be fixed and retried.
     void run({
       key: 'adopt',
       label: `adopt ${id}`,
       sub: 'import',
       args: importArgs(id, adoptTo()),
       describe: decode<ImportJson>(describeImport),
+    }).then((ok) => {
+      if (ok) {
+        setAdoptId('');
+        setAdoptTo('');
+        setAdoptOpen(false);
+      }
     });
   }
 
@@ -345,7 +364,7 @@ export default function Project(props: { scenario: string }) {
           </form>
         </Show>
 
-        <Presets pending={pending()} onApply={(name) => void run(preset(name))} />
+        <Presets pending={pending()} opSeq={opSeq} onApply={(name) => void run(preset(name))} />
       </Show>
     </div>
   );

@@ -551,6 +551,12 @@
             }
           }
         }
+        // Like the real CLI, a successful import creates stack.toml
+        // implicitly: a fresh fixture gains the marker from here on.
+        if (fx.fresh) {
+          fx.report = (path) => ({ path, valid: true, markers: ['stack.toml', '.git', 'package.json'], errors: [] });
+          fx.fresh = false;
+        }
         if (!json) return okOut(log.join('\n'));
         return jsonOut({ command: 'import', commit: FULL, imported, already, gitignore: 'unchanged' });
       }
@@ -576,10 +582,22 @@
           const p = PRESETS.find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           // Mirrors the import case: same log lines, same lock updates, same
-          // auto-import of requires. A dry run reports without writing.
+          // auto-import of requires, same look-alike refusal. A dry run
+          // reports conflicts as part of the plan instead of throwing.
           const log = [];
           const imported = [];
           const already = [];
+          const conflicts = [];
+          // Like the real import plan, a refusal aborts before anything is
+          // written: collect every clash up front. A dry run reports them
+          // as part of the plan instead of throwing.
+          for (const imp of p.imports) {
+            const clash = !imp.to && !fx.lock.some((r) => r.id === imp.id) && fx.lookalikeFor?.[imp.id];
+            if (clash) conflicts.push(...clash);
+          }
+          if (conflicts.length && !dryRun) {
+            return errOut(`these files already exist with other content; move them or choose --to:\n  ${conflicts.join('\n  ')}`);
+          }
           for (const imp of p.imports) {
             const e = visible.find((x) => x.id === imp.id);
             if (!e || e.committed === false) {
@@ -603,10 +621,16 @@
               }
             }
           }
+          // A real apply creates stack.toml implicitly, like import; a dry
+          // run writes nothing.
+          if (!dryRun && fx.fresh) {
+            fx.report = (path) => ({ path, valid: true, markers: ['stack.toml', '.git', 'package.json'], errors: [] });
+            fx.fresh = false;
+          }
           if (!json) return okOut(log.join('\n'));
           return jsonOut({
             command: 'preset', action: 'apply', preset: name, commit: FULL,
-            imported, already, ...(dryRun ? { conflicts: [] } : {}), gitignore: 'unchanged',
+            imported, already, ...(dryRun ? { dryRun: true, conflicts } : {}), gitignore: 'unchanged',
           });
         }
         return errOut(`unknown preset action "${action}"`);

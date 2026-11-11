@@ -333,6 +333,29 @@ export function presetImportsHint(imports: PresetImport[]): string {
   return imports.map((i) => (i.to ? `${i.id} → ${i.to}` : i.id)).join(', ');
 }
 
+/**
+ * A dry-run preview names pre-op lock state: it may only land when no op
+ * started since it was requested. The project page bumps a sequence counter
+ * on every op start; the preview carries the count from its request, and a
+ * mismatch means an op began mid-flight, so the answer is stale and dropped.
+ */
+export function previewFresh(requestSeq: number, opSeqNow: number): boolean {
+  return requestSeq === opSeqNow;
+}
+
+/**
+ * A preset row's counts against the lock: "2 imports, 1 new" ("all here"
+ * when nothing is new). Once a preview has named `deps` auto-imported
+ * dependencies, " +N dep" is appended so the row agrees with the preview's
+ * "would import" total.
+ */
+export function presetCountText(imports: PresetImport[], ids: Set<string>, deps: number): string {
+  const fresh = imports.filter((i) => !ids.has(i.id)).length;
+  const n = `${imports.length} import${imports.length === 1 ? '' : 's'}`;
+  const base = fresh ? `${n}, ${fresh} new` : `${n}, all here`;
+  return deps > 0 ? `${base} +${deps} dep` : base;
+}
+
 // ------------------------------------------------------------------ op summaries
 
 export type OpSection = { title: string; lines: string[]; tone?: 'bad' | 'dim' };
@@ -438,8 +461,14 @@ export function describePresetPreview(r: PresetApplyJson): OpSection[] {
     });
   }
   if (r.imported.length) {
+    // Dependencies pulled in via `required by` are named so the total agrees
+    // with the preset row's counts ("2 imports, 1 new +1 dep").
+    const deps = r.imported.filter((p) => p.requiredBy).length;
+    const title = deps
+      ? `would import ${plural(r.imported.length, 'entry', 'entries')} (${plural(deps, 'dependency', 'dependencies')})`
+      : `would import ${plural(r.imported.length, 'entry', 'entries')}`;
     secs.push({
-      title: `would import ${plural(r.imported.length, 'entry', 'entries')}`,
+      title,
       lines: r.imported.map((p) =>
         `${p.id} → ${p.path}${p.requiredBy ? ` (required by ${p.requiredBy})` : ''}`,
       ),

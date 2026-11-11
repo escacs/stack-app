@@ -122,7 +122,7 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .chip.edited, .chip.update, .chip.gone { color: var(--accent); }
 
 /* op logs + conflicts --------------------------------------------------- */
-.oplog { margin-top: 16px; }
+.oplog { margin: 16px 0; }
 .opsec p { margin: 12px 0 4px; }
 .opsec.conflict p::before { content: "! "; }
 .opsec.conflict .raw { color: var(--accent); }

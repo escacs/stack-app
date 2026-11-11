@@ -17,9 +17,11 @@ import {
   importArgs,
   parseJsonOut,
   presetApplyArgs,
+  presetCountText,
   presetImportsHint,
   presetListArgs,
   presetShowArgs,
+  previewFresh,
   refusalFiles,
   searchArgs,
   showFileArgs,
@@ -511,7 +513,7 @@ describe('describePresetPreview', () => {
 
   it('lists what would land where and what is already imported', () => {
     const secs = describePresetPreview(dryRun);
-    expect(secs[0].title).toBe('would import 2 entries');
+    expect(secs[0].title).toBe('would import 2 entries (1 dependency)');
     expect(secs[0].lines).toEqual([
       'templates/react-vite-tooling → .',
       'components/base/button → src/components/button (required by x)',
@@ -527,6 +529,23 @@ describe('describePresetPreview', () => {
     for (const s of secs) expect(s.title).not.toMatch(/^imported /);
   });
 
+  it('names the dependency count only when a preview pulled some in', () => {
+    const direct = describePresetPreview({
+      ...dryRun,
+      imported: [{ id: 'templates/react-vite-tooling', path: '.' }],
+    });
+    expect(direct[0].title).toBe('would import 1 entry');
+    const twoDeps = describePresetPreview({
+      ...dryRun,
+      imported: [
+        { id: 'a', path: 'a' },
+        { id: 'b', path: 'b', requiredBy: 'a' },
+        { id: 'c', path: 'c', requiredBy: 'a' },
+      ],
+    });
+    expect(twoDeps[0].title).toBe('would import 3 entries (2 dependencies)');
+  });
+
   it('reports the quiet case and the gitignore touch', () => {
     expect(describePresetPreview({ ...dryRun, imported: [], already: [] })).toEqual([
       { title: 'nothing new: everything already here', lines: [], tone: 'dim' },
@@ -537,6 +556,42 @@ describe('describePresetPreview', () => {
       lines: ['managed escacs block would update'],
       tone: 'dim',
     });
+  });
+});
+
+describe('previewFresh', () => {
+  it('keeps a preview when no op started since its request', () => {
+    expect(previewFresh(3, 3)).toBe(true);
+  });
+
+  it('drops a preview that resolves after any op started', () => {
+    // The op may still be running or long finished: either way the lock
+    // state the dry run named is gone.
+    expect(previewFresh(3, 4)).toBe(false);
+    expect(previewFresh(3, 5)).toBe(false);
+  });
+});
+
+describe('presetCountText', () => {
+  const imports = [
+    { id: 'components/react/button', to: 'src/components/ui' },
+    { id: 'skills/file-pr', to: null },
+  ];
+
+  it('counts imports and fresh rows against the lock', () => {
+    expect(presetCountText(imports, new Set(['skills/file-pr']), 0)).toBe('2 imports, 1 new');
+    expect(presetCountText(imports, new Set(), 0)).toBe('2 imports, 2 new');
+  });
+
+  it('reads all here when nothing is new', () => {
+    expect(
+      presetCountText(imports, new Set(['components/react/button', 'skills/file-pr']), 0),
+    ).toBe('2 imports, all here');
+  });
+
+  it('appends the preview-named dependencies so the row matches the preview', () => {
+    expect(presetCountText(imports, new Set(['skills/file-pr']), 1)).toBe('2 imports, 1 new +1 dep');
+    expect(presetCountText(imports, new Set(['skills/file-pr']), 2)).toBe('2 imports, 1 new +2 dep');
   });
 });
 

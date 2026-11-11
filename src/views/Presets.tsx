@@ -11,11 +11,12 @@ import {
   describePresetPreview,
   fromStackOut,
   presetApplyArgs,
+  presetCountText,
   presetImportsHint,
   presetListArgs,
+  previewFresh,
   type OpSection,
   type PresetApplyJson,
-  type PresetImport,
   type PresetListItem,
   type PresetListJson,
 } from '../json';
@@ -28,7 +29,12 @@ export const presetKey = (name: string): string => `preset ${name}`;
 type Loaded = { presets: PresetListItem[]; error: string | null };
 type Preview = { name: string; sections: OpSection[]; error: string | null };
 
-export function Presets(props: { pending: string | null; onApply: (name: string) => void }) {
+export function Presets(props: {
+  pending: string | null;
+  /** Op sequence from the project page, bumped on every op start. */
+  opSeq: () => number;
+  onApply: (name: string) => void;
+}) {
   // A string key: a config save that leaves project and stack alone yields
   // the same key, so the resource does not refetch.
   const source = () => {
@@ -48,16 +54,31 @@ export function Presets(props: { pending: string | null; onApply: (name: string)
 
   const [preview, setPreview] = createSignal<Preview | null>(null);
   const [previewing, setPreviewing] = createSignal<string | null>(null);
+  // Auto-imported dependencies named by each preset's last preview, so its
+  // row agrees with the preview total ("2 imports, 1 new +1 dep").
+  const [depCounts, setDepCounts] = createSignal<Record<string, number>>({});
+
+  function clearPreview() {
+    setPreview(null);
+    setDepCounts({});
+  }
 
   async function runPreview(name: string) {
     const c = config();
     if (!c?.project || props.pending || previewing()) return;
+    // The request's sequence: an op starting mid-flight voids the answer,
+    // which must be dropped on resolve instead of re-appearing stale.
+    const seq = props.opSeq();
     setPreviewing(name);
-    setPreview(null);
+    clearPreview();
     try {
       const out = await stackRun('preset', presetApplyArgs(name, true), c.project, c.stackPath);
-      setPreview({ name, sections: describePresetPreview(fromStackOut<PresetApplyJson>(out)), error: null });
+      const json = fromStackOut<PresetApplyJson>(out);
+      if (!previewFresh(seq, props.opSeq())) return;
+      setDepCounts((m) => ({ ...m, [name]: json.imported.filter((p) => p.requiredBy).length }));
+      setPreview({ name, sections: describePresetPreview(json), error: null });
     } catch (err) {
+      if (!previewFresh(seq, props.opSeq())) return;
       setPreview({ name, sections: [], error: errText(err) });
     } finally {
       setPreviewing(null);
@@ -66,25 +87,19 @@ export function Presets(props: { pending: string | null; onApply: (name: string)
 
   // A preview names lock state: a new project, or any op starting, voids it.
   createEffect(
-    on(source, () => setPreview(null), { defer: true }),
+    on(source, () => clearPreview(), { defer: true }),
   );
   createEffect(
     on(
       () => props.pending,
       (p) => {
-        if (p) setPreview(null);
+        if (p) clearPreview();
       },
       { defer: true },
     ),
   );
 
-  // "3 imports, 1 new" against the lock ("all here" when nothing is new).
-  const counts = (imports: PresetImport[]): string => {
-    const ids = new Set(lock().rows.map((r) => r.id));
-    const fresh = imports.filter((i) => !ids.has(i.id)).length;
-    const n = `${imports.length} import${imports.length === 1 ? '' : 's'}`;
-    return fresh ? `${n}, ${fresh} new` : `${n}, all here`;
-  };
+  const haveIds = () => new Set(lock().rows.map((r) => r.id));
 
   return (
     <Show when={loaded()}>
@@ -101,7 +116,7 @@ export function Presets(props: { pending: string | null; onApply: (name: string)
                       <span>{p.name}</span>
                       <span class="dimtxt">{p.description}</span>
                       <span class="lead" aria-hidden="true" />
-                      <span class="dimtxt">{counts(p.imports)}</span>
+                      <span class="dimtxt">{presetCountText(p.imports, haveIds(), depCounts()[p.name] ?? 0)}</span>
                       <button
                         class="btn"
                         title={`dry run: what ${p.name} would import and what is already here (nothing is written)`}
@@ -115,7 +130,7 @@ export function Presets(props: { pending: string | null; onApply: (name: string)
                         title={presetImportsHint(p.imports)}
                         disabled={!!props.pending || !!previewing()}
                         onClick={() => {
-                          setPreview(null);
+                          clearPreview();
                           props.onApply(p.name);
                         }}
                       >
