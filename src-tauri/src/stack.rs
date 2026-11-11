@@ -1205,6 +1205,29 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// `target` expressed relative to the current dir, so a test can feed
+    /// the lookup a relative PATH entry that really leads somewhere. `None`
+    /// when they share no root (different Windows drives).
+    fn relative_from_cwd(target: &Path) -> Option<PathBuf> {
+        let cwd = std::env::current_dir().ok()?;
+        let cwd_comps: Vec<_> = cwd.components().collect();
+        let tgt_comps: Vec<_> = target.components().collect();
+        let common = cwd_comps
+            .iter()
+            .zip(tgt_comps.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if common == 0 {
+            return None;
+        }
+        let mut rel = PathBuf::new();
+        for _ in common..cwd_comps.len() {
+            rel.push("..");
+        }
+        rel.extend(tgt_comps[common..].iter());
+        Some(rel)
+    }
+
     #[test]
     fn rejects_unknown_subcommands_and_flags() {
         let p = proj("rej");
@@ -1762,6 +1785,16 @@ mod tests {
         let no_appdir = OsStr::new("");
         assert_eq!(find_node_in(OsStr::new(":.:relative/bin"), no_appdir), None);
         assert_eq!(find_node_in(OsStr::new(""), no_appdir), None);
+        // A relative entry that genuinely reaches the planted `node`: this
+        // is the ./node case (the child runs with cwd = project dir), and
+        // without the relative-entry skip it resolves to the booby trap.
+        let rel = relative_from_cwd(&p).expect("temp dir shares a root with the cwd");
+        assert!(
+            rel.join("node").is_file(),
+            "test setup: relative entry reaches the booby trap"
+        );
+        let only_rel = std::env::join_paths([&rel]).unwrap();
+        assert_eq!(find_node_in(&only_rel, no_appdir), None);
         // An absolute entry still resolves, and the answer is always absolute.
         let found = find_node_in(OsStr::new(&p.display().to_string()), no_appdir)
             .expect("absolute entry resolves");
