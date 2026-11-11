@@ -1097,20 +1097,26 @@ fn empty_capture() -> Captured {
     }
 }
 
+/// SIGKILL the process group led by `pid` (the child runs in its own group,
+/// so its pgid is its pid). ESRCH (already gone) is harmless. Unix only.
+#[cfg(unix)]
+fn kill_process_group(pid: u32) {
+    let pgid = pid as i32;
+    if pgid > 0 {
+        // A negative pid addresses the whole group.
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+    }
+}
+
 /// SIGKILL the child and everything it started. On unix the child runs in
 /// its own process group, so grandchildren (git fetching in the background)
 /// die too instead of holding the pipes open and blocking the drain threads
 /// past the timeout. Elsewhere this is a plain kill.
 #[cfg(unix)]
 fn kill_child_tree(child: &mut std::process::Child) {
-    let pgid = child.id() as i32;
-    if pgid > 0 {
-        // A negative pid addresses the whole process group; ESRCH (already
-        // gone) is harmless, and the plain kill below is the backstop.
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-    }
+    kill_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -1119,6 +1125,45 @@ fn kill_child_tree(child: &mut std::process::Child) {
 fn kill_child_tree(child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// How long the pipe drains get after the child exits before the process
+/// group is killed: a lingering grandchild must not block the run forever.
+#[cfg(unix)]
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Join the drain threads after the child exited. On unix a grandchild may
+/// still hold the pipes, so the joins get a bounded grace period, then the
+/// process group is SIGKILLed and the joins complete. Elsewhere the joins
+/// are unconditional (current behaviour).
+#[cfg(unix)]
+fn join_drains(
+    out_h: std::thread::JoinHandle<Captured>,
+    err_h: std::thread::JoinHandle<Captured>,
+    pid: u32,
+) -> (Captured, Captured) {
+    let start = Instant::now();
+    while !out_h.is_finished() || !err_h.is_finished() {
+        if start.elapsed() >= DRAIN_GRACE {
+            kill_process_group(pid);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let out = out_h.join().unwrap_or_else(|_| empty_capture());
+    let err = err_h.join().unwrap_or_else(|_| empty_capture());
+    (out, err)
+}
+
+#[cfg(not(unix))]
+fn join_drains(
+    out_h: std::thread::JoinHandle<Captured>,
+    err_h: std::thread::JoinHandle<Captured>,
+    _pid: u32,
+) -> (Captured, Captured) {
+    let out = out_h.join().unwrap_or_else(|_| empty_capture());
+    let err = err_h.join().unwrap_or_else(|_| empty_capture());
+    (out, err)
 }
 
 /// Run `cmd` with piped output, killing the child past `timeout`. Pipes drain
@@ -1164,8 +1209,7 @@ fn run_with_timeout(
             }
         }
     };
-    let out = out_h.join().unwrap_or_else(|_| empty_capture());
-    let err = err_h.join().unwrap_or_else(|_| empty_capture());
+    let (out, err) = join_drains(out_h, err_h, child.id());
     Ok((code, out, err))
 }
 
@@ -1485,6 +1529,25 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(15),
             "drain threads blocked past the kill"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exiting_child_with_lingering_grandchild_returns_promptly() {
+        // The child exits at once, leaving `sleep 30` holding stdout: the
+        // drain joins would block for the full 30s without the bounded
+        // post-exit wait. Returns the child's own exit code and output.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 30 & exec echo done"]);
+        let start = Instant::now();
+        let (code, out, _err) =
+            run_with_timeout(&mut cmd, Duration::from_secs(60), "list").expect("exited child returns");
+        assert_eq!(code, 0);
+        assert_eq!(String::from_utf8_lossy(&out.bytes).trim(), "done");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "drains blocked past the grace period"
         );
     }
 
