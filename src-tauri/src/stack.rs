@@ -548,6 +548,8 @@ fn find_node_on_path() -> Option<PathBuf> {
         .find(|p| is_executable_file(p))
 }
 
+const NODE_NOT_FOUND: &str = "node was not found on PATH. Install Node.js 22 or newer (https://nodejs.org), then relaunch the app.";
+
 #[cfg(unix)]
 fn is_executable_file(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -559,10 +561,61 @@ fn is_executable_file(p: &Path) -> bool {
     p.is_file()
 }
 
+/// The `PATH` a child will actually see after cleaning: bundle entries
+/// stripped, or the original when stripping would empty it (`PATH` is never
+/// deleted — see `strip_var`). Cleaning treats `PATH` the same at both
+/// levels, so one resolver serves the plain probe, the retry and the spawn.
+/// Pure so tests can pin it without touching the process env.
+fn effective_path(path_var: &OsStr, appdir: &OsStr) -> OsString {
+    strip_entries(path_var, appdir, false).unwrap_or_else(|| path_var.to_os_string())
+}
+
+/// First `node` on `PATH` reached through an absolute entry. Empty entries
+/// (the current directory) and relative entries (`.`, `bin`, ...) are
+/// skipped: the child runs with the project as its working directory, so a
+/// bare `node` lookup could execute a project's `./node`, which would break
+/// the "never run project code" contract. Resolves from the cleaned `PATH`
+/// the child will get, so the probe and the spawn always agree on which
+/// binary runs. Pure so tests can pin it without touching the process env.
+fn find_node_in(path_var: &OsStr, appdir: &OsStr) -> Option<PathBuf> {
+    let effective = effective_path(path_var, appdir);
+    for dir in std::env::split_paths(&effective) {
+        if dir.as_os_str().is_empty() || !dir.is_absolute() {
+            continue;
+        }
+        let node = dir.join("node");
+        if is_executable_file(&node) {
+            return Some(node);
+        }
+        // Windows installs node.exe; the OS lookup used to find it for us.
+        #[cfg(windows)]
+        {
+            let exe = dir.join("node.exe");
+            if exe.is_file() {
+                return Some(exe);
+            }
+        }
+    }
+    None
+}
+
+fn resolve_node() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
+    find_node_in(&path, &appdir)
+}
+
 /// One `node --version` probe at an explicit cleaning level, independent of
 /// the global decision (a fresh probe must not be masked by an earlier one).
+/// Probes the same resolved binary the spawn runs (see [`find_node_in`]).
 fn spawn_node_version(deep: bool) -> std::io::Result<Output> {
-    let mut cmd = Command::new("node");
+    let Some(node) = resolve_node() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "node not found on PATH",
+        ));
+    };
+    let mut cmd = Command::new(node);
     cmd.arg("--version");
     clean_env(&mut cmd, deep);
     cmd.output()
@@ -964,7 +1017,12 @@ pub fn run_stack(
     if !cli.is_file() {
         return Err("tools/stack/cli.mjs is missing in the stack directory".to_string());
     }
-    let mut cmd = Command::new("node");
+    // Same binary the probe checked: resolved before the cwd becomes the
+    // project dir, so a `./node` in the project can never be executed.
+    let Some(node) = resolve_node() else {
+        return Err(NODE_NOT_FOUND.to_string());
+    };
+    let mut cmd = Command::new(node);
     unpoison_env(&mut cmd);
     cmd.arg(&cli)
         .arg(subcommand)
@@ -1039,6 +1097,30 @@ fn empty_capture() -> Captured {
     }
 }
 
+/// SIGKILL the child and everything it started. On unix the child runs in
+/// its own process group, so grandchildren (git fetching in the background)
+/// die too instead of holding the pipes open and blocking the drain threads
+/// past the timeout. Elsewhere this is a plain kill.
+#[cfg(unix)]
+fn kill_child_tree(child: &mut std::process::Child) {
+    let pgid = child.id() as i32;
+    if pgid > 0 {
+        // A negative pid addresses the whole process group; ESRCH (already
+        // gone) is harmless, and the plain kill below is the backstop.
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn kill_child_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Run `cmd` with piped output, killing the child past `timeout`. Pipes drain
 /// on threads so a chatty child can never deadlock against a full buffer.
 fn run_with_timeout(
@@ -1046,6 +1128,11 @@ fn run_with_timeout(
     timeout: Duration,
     label: &str,
 ) -> Result<(i32, Captured, Captured), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1065,8 +1152,7 @@ fn run_with_timeout(
             Some(status) => break status.code().unwrap_or(-1),
             None => {
                 if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_child_tree(&mut child);
                     let _ = out_h.join();
                     let _ = err_h.join();
                     return Err(format!(
@@ -1363,6 +1449,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn timeout_kills_grandchildren_holding_the_pipes() {
+        // `sh -c 'sleep 30 & sleep 30'`: the background sleep inherits the
+        // stdout pipe, so killing only sh would leave the drain threads (and
+        // the timeout error) blocked for 30s. The group kill must end it all.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 30 & sleep 30"]);
+        let start = Instant::now();
+        let err = run_with_timeout(&mut cmd, Duration::from_millis(200), "list")
+            .expect_err("sh should have timed out");
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "drain threads blocked past the kill"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn run_captures_output_of_a_fast_child() {
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "echo out; echo err >&2"]);
@@ -1641,5 +1745,33 @@ mod tests {
         let mut plain = Command::new("node");
         clean_env_with(&mut plain, OsStr::new(""), with("/opt/mine/lib"), false);
         assert_eq!(plain.get_envs().count(), 0);
+    }
+
+    #[test]
+    fn node_lookup_skips_empty_and_relative_path_entries() {
+        // A `./node` planted in the project must never be the one resolved,
+        // even when PATH leads with cwd-style entries ("" and ".").
+        let p = proj("noderesolve");
+        let booby = p.join("node");
+        std::fs::write(&booby, "#!/bin/sh\necho pwned\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&booby, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let no_appdir = OsStr::new("");
+        assert_eq!(find_node_in(OsStr::new(":.:relative/bin"), no_appdir), None);
+        assert_eq!(find_node_in(OsStr::new(""), no_appdir), None);
+        // An absolute entry still resolves, and the answer is always absolute.
+        let found = find_node_in(OsStr::new(&p.display().to_string()), no_appdir)
+            .expect("absolute entry resolves");
+        assert_eq!(found, booby);
+        assert!(found.is_absolute());
+        // Bundle entries are stripped like the child env: a stale AppImage
+        // mount never shadows the real node.
+        let with_bundle = format!("/tmp/.mount_stack-app-test-nonexistent/usr/bin:{}", p.display());
+        let found = find_node_in(OsStr::new(&with_bundle), no_appdir).expect("user entry resolves");
+        assert_eq!(found, booby);
+        let _ = std::fs::remove_dir_all(&p);
     }
 }
