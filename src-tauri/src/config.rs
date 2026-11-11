@@ -58,7 +58,7 @@ fn lock_config() -> Result<std::sync::MutexGuard<'static, ()>, String> {
         .map_err(|_| "config store is unavailable".to_string())
 }
 
-/// Load the config at `path`. A missing file means defaults; an unreadable
+/// Load the config at `path`. A missing file means defaults; an unparsable
 /// one is renamed aside to `config.json.bad` and also means defaults, plus a
 /// notice for the UI. Pure of Tauri so tests can pin it on a temp dir.
 fn load_config_from(path: &Path) -> Result<AppConfig, String> {
