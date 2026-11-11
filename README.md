@@ -118,6 +118,7 @@ type AppConfig = {
   scanRoots: string[];        // more scan roots; save_config stores them verbatim
   worker: string | null;      // e.g. "mel"; a label only, never sent to the stack
   project: string | null;     // currently selected project dir
+  notice: string | null;      // set when get_config quarantined a corrupt config.json to config.json.bad; never persisted
 };
 type ProjectReport = { path: string; valid: boolean; markers: string[]; errors: string[] };
 type NodeStatus = { ok: boolean; version: string | null; major: number | null; error: string | null };

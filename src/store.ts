@@ -31,6 +31,9 @@ import type { LockStatus } from './parse';
 export const [config, setConfig] = createSignal<AppConfig | null>(null);
 export const [node, setNode] = createSignal<NodeStatus | null>(null);
 export const [bootError, setBootError] = createSignal<string | null>(null);
+// One-line notice when get_config recovered from a corrupt config.json
+// (renamed aside to config.json.bad). Rendered once by App.
+export const [configNotice, setConfigNotice] = createSignal<string | null>(null);
 export const [report, setReport] = createSignal<ProjectReport | null>(null);
 export const [workers, setWorkers] = createSignal<JsonEntry[]>([]);
 // False until the first worker list settles (or fails): the who screen must
@@ -132,6 +135,7 @@ export async function boot(): Promise<void> {
     const c = await getConfig();
     // Older configs predate scanRoots; normalize so views can rely on it.
     if (!Array.isArray(c.scanRoots)) c.scanRoots = [];
+    setConfigNotice(c.notice ?? null);
     // Nothing is remembered: an older config's user and project are dropped.
     if (c.worker || c.project) {
       c.worker = null;
@@ -278,7 +282,7 @@ export async function clearStackPath(): Promise<void> {
   if (err) setActionError(err);
 }
 
-/** Set (or clear) the remembered user. Failure keeps the previous user. */
+/** Set (or clear) the remembered worker. Failure keeps the previous worker. */
 export async function chooseWorker(name: string | null): Promise<void> {
   const c = config();
   if (!c) return;
@@ -331,6 +335,8 @@ export async function chooseProject(path: string | null): Promise<void> {
   // The bridge returns the saved config with the path added to recents. It
   // holds no user or project (neither is saved), so the session's own stay.
   const cfg = await addRecentProject(path).catch(() => next);
+  // A mid-session config reset surfaces its notice here, as at boot.
+  setConfigNotice(cfg.notice ?? null);
   setReport(rep);
   setLock(emptyLock());
   setProjectDone(true);

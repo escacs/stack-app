@@ -1,5 +1,5 @@
-// Typed wrapper over the Tauri bridge (see app/README.md "Bridge command
-// surface"). In a plain browser the dev mock (app/dev/mock-app-bridge.js)
+// Typed wrapper over the Tauri bridge (see README.md "Bridge command
+// surface"). In a plain browser the dev mock (dev/mock-app-bridge.js)
 // provides window.__TAURI_INTERNALS__, so invoke() works unchanged.
 import { invoke } from '@tauri-apps/api/core';
 import { withOffline } from './stackArgs';
@@ -12,6 +12,8 @@ export type AppConfig = {
   scanRoots: string[];
   worker: string | null;
   project: string | null;
+  /** One-line notice when get_config recovered from a corrupt file, else null. Never persisted. */
+  notice: string | null;
 };
 
 export type ProjectReport = {
