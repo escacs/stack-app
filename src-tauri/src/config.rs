@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
@@ -14,6 +15,8 @@ const MAX_RECENT: usize = 10;
 /// `get_config` could quarantine a file a concurrent writer just saved, or
 /// race another reader quarantining the same file.
 static CONFIG_LOCK: Mutex<()> = Mutex::new(());
+/// Distinguishes temp files within one process (the pid covers the rest).
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,7 +96,13 @@ fn write_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
     config.notice = None;
     let text =
         serde_json::to_string_pretty(&config).map_err(|e| format!("encode config: {e}"))?;
-    let tmp = path.with_extension("json.tmp");
+    // Unique per process and per write, so two app instances sharing a
+    // config dir can't overwrite each other's temp file.
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}-{}",
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     // A failed write or rename removes the temp file; the previous
     // config.json is never touched, so it stays intact on every error.
     if let Err(e) = std::fs::write(&tmp, &text) {
@@ -187,7 +196,13 @@ mod tests {
         // A notice in memory (from an earlier recovery) is never persisted.
         saved.notice = Some("stale".to_string());
         write_config_to(&path, &saved).unwrap();
-        assert!(!dir.join("config.json.tmp").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().starts_with("config.json.tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("notice"), "stored config stays clean: {raw}");
         let back = load_config_from(&path).unwrap();
