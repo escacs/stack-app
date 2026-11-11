@@ -536,16 +536,11 @@ fn unpoison_env(cmd: &mut Command) {
     clean_env(cmd, SCRUB_ENV.load(Ordering::Relaxed));
 }
 
-/// First `node` on `PATH` outside any AppImage mount (the cleaned attempt
-/// never looks there), for the error text. Only looked up when a probe has
-/// failed.
+/// The `node` the probe tried, for the error text: the same lookup the
+/// spawn uses, so the message never names a `./node` the spawn would skip.
+/// Only looked up when a probe has failed.
 fn find_node_on_path() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    let appdir = std::env::var_os("APPDIR").unwrap_or_default();
-    std::env::split_paths(&path)
-        .filter(|d| !is_bundle_path(d, &appdir))
-        .map(|d| d.join("node"))
-        .find(|p| is_executable_file(p))
+    resolve_node()
 }
 
 const NODE_NOT_FOUND: &str = "node was not found on PATH. Install Node.js 22 or newer (https://nodejs.org), then relaunch the app.";
