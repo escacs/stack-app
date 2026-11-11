@@ -8,16 +8,48 @@ import Lenis from 'lenis';
 import 'lenis/dist/lenis.css';
 
 let lenis: Lenis | null = null;
+let detachPrev: (() => void) | null = null;
+
+/** Movement past this from Lenis's last written position counts as external. */
+const EXTERNAL_TOLERANCE_PX = 1;
+
+/**
+ * True when the window is somewhere other than where Lenis last wrote it: a
+ * scrollbar drag, an unhandled navigation key, a focus scroll, an anchor
+ * jump, or a clamp after resize. Lenis lerps a float while the browser stores
+ * whole pixels, so its own writes read back within a pixel and never count.
+ */
+export function isExternalScroll(actual: number, written: number): boolean {
+  return Math.abs(actual - written) > EXTERNAL_TOLERANCE_PX;
+}
 
 /** Attach Lenis to the window scroller; returns a detach function. */
 export function attachSmooth(): () => void {
   if (typeof window === 'undefined') return () => {};
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};
-  lenis = new Lenis({ lerp: 0.075, allowNestedScroll: true, autoRaf: true });
-  return () => {
-    lenis?.destroy();
-    lenis = null;
+  detachPrev?.();
+  const instance = new Lenis({ lerp: 0.075, allowNestedScroll: true, autoRaf: true });
+  lenis = instance;
+  const onScroll = () => {
+    // Lenis only re-syncs on native scrolls when it is not mid smooth-scroll
+    // (onNativeScroll in lenis.mjs), so a native move during a glide would be
+    // overwritten by the stale trajectory for ~1s. Rebase instead: stop()
+    // kills the glide and start() re-syncs onto the new position. Lenis's own
+    // writes echo back within a pixel and never trigger this.
+    if (isExternalScroll(window.scrollY, instance.animatedScroll)) {
+      instance.stop();
+      instance.start();
+    }
   };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  const detach = () => {
+    window.removeEventListener('scroll', onScroll);
+    instance.destroy();
+    if (lenis === instance) lenis = null;
+    if (detachPrev === detach) detachPrev = null;
+  };
+  detachPrev = detach;
+  return detach;
 }
 
 /** Route changes jump to the top at once instead of fighting the glide. */
