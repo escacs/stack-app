@@ -228,7 +228,7 @@ package.json vite.config.ts tsconfig.json index.html
 web-vendor/style.css            # snapshot of the stack website's stylesheet
 dev/mock-bridge.js dev/mock-app-bridge.js
 src/                             # SolidJS renderer
-  index.tsx App.tsx app.css ui.tsx site.tsx glide.ts
+  index.tsx App.tsx app.css ui.tsx site.tsx smooth.ts
   bridge.ts store.ts updater.ts router.ts onboard.ts
   browseData.ts stackArgs.ts json.ts parse.ts
   views/

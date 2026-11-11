@@ -19,6 +19,7 @@
     "@tauri-apps/plugin-dialog": "2.8.4",
     "@tauri-apps/plugin-process": "2.4.0",
     "@tauri-apps/plugin-updater": "2.12.0",
+    "lenis": "1.3.27",
     "solid-js": "1.9.18"
   },
   "devDependencies": {
