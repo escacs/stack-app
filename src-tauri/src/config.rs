@@ -9,10 +9,10 @@ use tauri::{AppHandle, Manager};
 
 const MAX_RECENT: usize = 10;
 
-/// Serializes config writes (and the read-modify-write in
-/// [`add_recent_project`]) so concurrent commands can't lose updates. Reads
-/// stay lock-free: writes land via atomic rename, so a reader never sees a
-/// half-written file.
+/// Serializes all config access. Reads take it too, not just writes: a
+/// corrupt file is quarantined (a write) during the read, so an unlocked
+/// `get_config` could quarantine a file a concurrent writer just saved, or
+/// race another reader quarantining the same file.
 static CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -106,6 +106,7 @@ fn write_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
 
 #[tauri::command(async)]
 pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
+    let _guard = lock_config()?;
     let path = config_path(&app)?;
     load_config_from(&path)
 }
