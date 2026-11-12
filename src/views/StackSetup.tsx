@@ -8,7 +8,7 @@ import { chooseStackPath, clearStackPath, config, provisionCheckout, revalidateS
 
 export default function StackSetup() {
   const [notice, setNotice] = createSignal<string | null>(null);
-  const [busy, setBusy] = createSignal<'get' | 'pick' | null>(null);
+  const [busy, setBusy] = createSignal<'get' | 'pick' | 'auto' | null>(null);
 
   async function get() {
     setBusy('get');
@@ -24,10 +24,10 @@ export default function StackSetup() {
   }
 
   async function auto() {
-    setBusy(true);
+    setBusy('auto');
     setNotice(null);
     await clearStackPath();
-    setBusy(false);
+    setBusy(null);
   }
 
   return (
@@ -52,10 +52,10 @@ export default function StackSetup() {
           <button
             class="linklike"
             title="forget the saved folder, back to the automatic lookup"
-            disabled={busy()}
+            disabled={busy() !== null}
             onClick={() => void auto()}
           >
-            auto
+            {busy() === 'auto' ? 'auto…' : 'auto'}
           </button>
         </Show>
       </p>
