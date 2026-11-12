@@ -197,6 +197,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   // Shift-select anchor (last toggled or cursor row) and the gutter drag flag.
   let anchor: string | null = null;
   let dragging = false;
+  // Gutter press point: hover extends the selection only past the drag
+  // threshold, so the bar-shift under a stationary cursor never extends.
+  let dragX = 0;
+  let dragY = 0;
   // Dry-run generation: a base edit restarts the dry runs, older answers drop.
   let dryGen = 0;
   let qiTimer: ReturnType<typeof setTimeout> | undefined;
@@ -471,12 +475,19 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     ev.preventDefault();
     if (ev.shiftKey) extendTo(e.id, ev.ctrlKey || ev.metaKey);
     else toggleRow(e.id);
+    dragX = ev.clientX;
+    dragY = ev.clientY;
     dragging = true;
   };
 
-  /** Gutter hover mid-drag: the selection follows the dragged range. */
-  const onGutterOver = (e: JsonEntry): void => {
-    if (dragging) extendTo(e.id, false);
+  /**
+   * Gutter hover mid-drag: the selection follows the dragged range, but
+   * only once the pointer travelled past the press point. The selection
+   * bar appearing shifts rows under a stationary cursor, whose synthetic
+   * enter must not extend: a single click selects exactly one row.
+   */
+  const onGutterOver = (e: JsonEntry, ev: MouseEvent): void => {
+    if (dragging && dragPassed(dragX, dragY, ev.clientX, ev.clientY)) extendTo(e.id, false);
   };
 
   // ------------------------------------------------------------------ batch import
@@ -1146,7 +1157,7 @@ type BatchListProps = {
   batchBusy: boolean;
   onRowClick: (e: JsonEntry, ev: MouseEvent) => void;
   onGutterDown: (e: JsonEntry, ev: MouseEvent) => void;
-  onGutterOver: (e: JsonEntry) => void;
+  onGutterOver: (e: JsonEntry, ev: MouseEvent) => void;
   onBatchToggle: (id: string) => void;
   /** Null on search results, which get selection but no import-all. */
   onImportAll: ((label: string, members: JsonEntry[]) => void) | null;
@@ -1391,7 +1402,7 @@ function EntryRow(
     batchBusy: boolean;
     onRowClick: (e: JsonEntry, ev: MouseEvent) => void;
     onGutterDown: (e: JsonEntry, ev: MouseEvent) => void;
-    onGutterOver: (e: JsonEntry) => void;
+    onGutterOver: (e: JsonEntry, ev: MouseEvent) => void;
     onBatchToggle: (id: string) => void;
   } & QiProps,
 ) {
@@ -1462,7 +1473,7 @@ function EntryRow(
           title="select row (drag across rows to select several)"
           aria-hidden="true"
           onMouseDown={(ev) => props.onGutterDown(props.e, ev)}
-          onMouseEnter={() => props.onGutterOver(props.e)}
+          onMouseEnter={(ev) => props.onGutterOver(props.e, ev)}
         />
         <a
           ref={rowEl}
