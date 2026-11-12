@@ -12,6 +12,7 @@ import {
   adoptCountText,
   adoptDryRunArgs,
   conflictsFor,
+  mapPooled,
   matchAdoptCandidates,
   type AdoptCandidate,
 } from '../adopt';
@@ -158,8 +159,10 @@ export default function Project(props: { scenario: string }) {
   }
 
   // One dry run per candidate: collisions under its destination mean its
-  // files differ, none mean they match the stack entry. Skipped while an op
-  // runs; the lock refresh after it re-triggers this through candidatesKey.
+  // files differ, none mean they match the stack entry. Pooled four at a
+  // time, so a long candidate list never spawns a hundred node processes at
+  // once. Skipped while an op runs; the lock refresh after it re-triggers
+  // this through candidatesKey.
   async function loadHints(key: string, busy: string | null): Promise<void> {
     if (busy || !key || key === hintedKey) return;
     const gen = ++hintGen;
@@ -168,18 +171,16 @@ export default function Project(props: { scenario: string }) {
     const proj = c.project;
     const stackPath = c.stackPath;
     const found: Record<string, 'identical' | 'differs'> = {};
-    await Promise.all(
-      candidates().map(async (cand) => {
-        try {
-          const out = await stackRun('import', adoptDryRunArgs(cand), proj, stackPath);
-          const data = fromStackOut<ImportDryRunJson>(out);
-          const mine = conflictsFor(data.conflicts ?? [], cand.to ?? cand.folder);
-          found[cand.id] = mine.length ? 'differs' : 'identical';
-        } catch {
-          // No hint for this one; the adopt button still works.
-        }
-      }),
-    );
+    await mapPooled(candidates(), 4, async (cand) => {
+      try {
+        const out = await stackRun('import', adoptDryRunArgs(cand), proj, stackPath);
+        const data = fromStackOut<ImportDryRunJson>(out);
+        const mine = conflictsFor(data.conflicts ?? [], cand.to ?? cand.folder);
+        found[cand.id] = mine.length ? 'differs' : 'identical';
+      } catch {
+        // No hint for this one; the adopt button still works.
+      }
+    });
     if (gen !== hintGen) return;
     hintedKey = key;
     setHints(found);
@@ -366,7 +367,7 @@ export default function Project(props: { scenario: string }) {
         {/*
           Adopt sits next to the set-up slot: both are about things not in
           stack.toml yet. With candidates, one line each with its adopt
-          button; with none, only the quiet other… link for the manual case.
+          button; with none, only the quiet adopt other… link for the manual case.
         */}
         <div class="adopt-block">
           <Show when={candidates().length}>
@@ -409,7 +410,7 @@ export default function Project(props: { scenario: string }) {
             aria-expanded={otherOpen()}
             onClick={toggleOther}
           >
-            other…
+            adopt other…
           </button>
           <Show when={otherOpen()}>
             <form
@@ -527,7 +528,7 @@ export default function Project(props: { scenario: string }) {
             </button>
           </Show>
           <Show when={lock().rows.length && lock().commit}>
-            <span class="dimtxt rev" title="stack commit the lock was last synced to">@{(lock().commit ?? '').slice(0, 7)}</span>
+            <span class="dimtxt rev" title="stack commit the lock was last synced to">stack @{(lock().commit ?? '').slice(0, 7)}</span>
           </Show>
         </div>
 
@@ -539,6 +540,9 @@ export default function Project(props: { scenario: string }) {
           >
             <p class="conflict" role="alert">untracked look-alikes, nothing written:</p>
             <pre class="raw">{lookalikes().join('\n')}</pre>
+            <Show when={logLabel().startsWith('adopt')}>
+              <p class="dimtxt">move or delete the differing files, then adopt again.</p>
+            </Show>
           </Show>
         </Show>
         <Show when={sections()}>

@@ -29,6 +29,9 @@ export function CliErr(props: { text: string }) {
 }
 
 export function Chip(props: { state: string }) {
+  // Clean rows keep the chip's slot but print nothing: only rows needing
+  // attention (edited, update, gone) carry a marker.
+  if (props.state === 'imported') return <span class="chip imported" />;
   return <span class={`chip ${props.state}`}>{props.state}</span>;
 }
 

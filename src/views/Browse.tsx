@@ -33,6 +33,7 @@ import {
   importArgs,
   importDestHint,
   needsImportDest,
+  previewFresh,
   quickImportError,
   quickImportLine,
   refusalFiles,
@@ -111,6 +112,9 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   const [qiAsk, setQiAsk] = createSignal<{ id: string; value: string } | null>(null);
   let inputEl: HTMLInputElement | undefined;
   let listGen = 0;
+  // Row-import generation, bumped on navigation and project switch: an
+  // import resolving afterwards is stale and must not land (see previewFresh).
+  let qiGen = 0;
   let qiTimer: ReturnType<typeof setTimeout> | undefined;
   const clearQiTimer = (): void => {
     if (qiTimer !== undefined) {
@@ -246,9 +250,11 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     clearQiTimer();
     setQiAsk(null);
+    const gen = qiGen;
     setQi({ id: e.id, phase: 'working' });
     try {
       const out = await stackRun('import', importArgs(e.id, dest ?? ''), c.project, c.stackPath);
+      if (!previewFresh(gen, qiGen)) return;
       const r = fromStackOut<ImportJson>(out);
       setQi({ id: e.id, phase: 'done', line: quickImportLine(r, e.id), sections: describeImport(r), expanded: false });
       await refreshLock();
@@ -258,15 +264,23 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       void load();
       armQiTimer(8000);
     } catch (err) {
+      if (!previewFresh(gen, qiGen)) return;
       const text = errText(err);
+      const lookalikes = refusalFiles(text);
       setQi({
         id: e.id,
         phase: 'error',
         line: quickImportError(text),
         err: text,
-        lookalikes: refusalFiles(text),
+        lookalikes,
         expanded: false,
       });
+      // A look-alike refusal on a skill or style is a dead end without a
+      // destination field, so offer the same inline `to` the row opens for
+      // components, prefilled with the default destination.
+      if (lookalikes.length && (e.kind === 'skill' || e.kind === 'style')) {
+        setQiAsk({ id: e.id, value: defaultImportDest(e) });
+      }
       armQiTimer(15000);
     }
   }
@@ -407,7 +421,23 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         clearQiTimer();
         setQi(null);
         setQiAsk(null);
+        qiGen++;
         window.scrollTo({ top: 0, behavior: 'instant' });
+      },
+      { defer: true },
+    ),
+  );
+
+  // A project switch clears the inline import state, like Project.tsx: the
+  // result and the ask field belong to the project they ran against.
+  createEffect(
+    on(
+      () => config()?.project ?? null,
+      () => {
+        qiGen++;
+        clearQiTimer();
+        setQi(null);
+        setQiAsk(null);
       },
       { defer: true },
     ),
@@ -671,7 +701,12 @@ function EntryRow(
       <Show when={qiDone(active())}>
         {(d) => (
           <div class="qires">
-            <button class="qiline" title="show the full import log" onClick={() => props.onToggleFull()}>
+            <button
+              class="qiline"
+              title="show the full import log"
+              aria-expanded={d().expanded}
+              onClick={() => props.onToggleFull()}
+            >
               {d().line}
             </button>
             <Show when={d().expanded}>
@@ -684,7 +719,12 @@ function EntryRow(
         {(s) => (
           <div class="qires">
             <span class="conflict">{s().line}</span>
-            <button class="btn" title="show the full error" onClick={() => props.onToggleFull()}>
+            <button
+              class="btn"
+              title="show the full error"
+              aria-expanded={s().expanded}
+              onClick={() => props.onToggleFull()}
+            >
               details
             </button>
             <Show when={s().expanded}>
@@ -784,6 +824,11 @@ function QiAsk(props: {
   );
 }
 
+/** Dim key hint under every browse list (never in the entry detail). */
+function ListHint() {
+  return <p class="dimtxt listhint">↑↓ move · i import</p>;
+}
+
 /** Flat entry list: the kind view, the `all` list and search results. */
 function EntryList(
   props: {
@@ -818,6 +863,7 @@ function EntryList(
           )}
         </For>
       </div>
+      <ListHint />
     </Show>
   );
 }
@@ -912,6 +958,7 @@ function ComponentKindView(
           }
         </For>
       </div>
+      <ListHint />
     </Show>
   );
 }
@@ -972,6 +1019,9 @@ function EntryDetail(props: {
     const u = upstream()?.['url'];
     return typeof u === 'string' ? u : null;
   };
+
+  // The destination belongs to the project it was typed for.
+  createEffect(on(() => props.source, () => setTo(''), { defer: true }));
 
   // Doc and previews refetch for this id and source only, never for config edits.
   createEffect(

@@ -379,10 +379,11 @@ export function presetImportsHint(imports: PresetImport[]): string {
 }
 
 /**
- * A dry-run preview names pre-op lock state: it may only land when no op
- * started since it was requested. The project page bumps a sequence counter
- * on every op start; the preview carries the count from its request, and a
- * mismatch means an op began mid-flight, so the answer is stale and dropped.
+ * A stale-completion guard: an async answer may only land when no generation
+ * bump happened since it was requested. Preset previews carry the project
+ * page's op sequence (bumped on every op start); row imports carry the
+ * browse page's own generation (bumped on navigation and project switch). A
+ * mismatch means the world moved mid-flight, so the answer is dropped.
  */
 export function previewFresh(requestSeq: number, opSeqNow: number): boolean {
   return requestSeq === opSeqNow;

@@ -256,12 +256,12 @@ export function Presets(props: {
                         <p class="dimtxt none">no preset matches “{query().trim()}”</p>
                       </Show>
                       <Show when={view().hidden > 0}>
-                        <button type="button" class="more" onClick={() => setAll(true)}>
+                        <button type="button" class="btn more" onClick={() => setAll(true)}>
                           +{view().hidden} more
                         </button>
                       </Show>
                       <Show when={all() && matched() > PRESET_ROWS}>
-                        <button type="button" class="more" onClick={() => setAll(false)}>
+                        <button type="button" class="btn more" onClick={() => setAll(false)}>
                           − fewer
                         </button>
                       </Show>

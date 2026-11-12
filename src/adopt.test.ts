@@ -7,6 +7,7 @@ import {
   adoptDryRunArgs,
   conflictsFor,
   defaultDestFor,
+  mapPooled,
   matchAdoptCandidates,
 } from './adopt';
 import type { JsonEntry } from './json';
@@ -198,5 +199,42 @@ describe('adoptCountText', () => {
   it('counts entries', () => {
     expect(adoptCountText(1)).toBe('1 look-alike entry');
     expect(adoptCountText(3)).toBe('3 look-alike entries');
+  });
+});
+
+describe('mapPooled', () => {
+  it('keeps result order when later items settle first', async () => {
+    const out = await mapPooled([30, 10, 20], 3, async (ms) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return ms;
+    });
+    expect(out).toEqual([30, 10, 20]);
+  });
+  it('caps the promises in flight at the limit', async () => {
+    let live = 0;
+    let peak = 0;
+    await mapPooled(Array.from({ length: 10 }, (_, i) => i), 4, async (i) => {
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 5));
+      live--;
+      return i;
+    });
+    expect(peak).toBe(4);
+  });
+  it('runs serially at limit 1 and handles the edges', async () => {
+    let live = 0;
+    let peak = 0;
+    const out = await mapPooled([1, 2, 3], 1, async (i) => {
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 1));
+      live--;
+      return i * 2;
+    });
+    expect(out).toEqual([2, 4, 6]);
+    expect(peak).toBe(1);
+    expect(await mapPooled([], 4, async (i: number) => i)).toEqual([]);
+    expect(await mapPooled([7], 99, async (i) => i)).toEqual([7]);
   });
 });

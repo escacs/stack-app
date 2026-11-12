@@ -107,13 +107,12 @@ input[type="text"]::placeholder { color: var(--ghost); }
 /* the cursor follows the whole row, including the action slot */
 .qi:hover .row::before { content: ">"; color: var(--dim); }
 .qiact { flex: none; min-width: 10ch; text-align: right; margin-left: 1ch; }
-/* the button stays out of sight (and out of the tab order) until the row
-   is hovered, focused or under the keyboard cursor */
-.qiact .btn { visibility: hidden; }
+/* the button idles dim and brightens when its row is hovered, focused
+   or under the keyboard cursor */
+.qiact .btn { opacity: .45; }
 .qi:hover .qiact .btn,
 .qi:focus-within .qiact .btn,
-.qirow > a.row[data-sel] + .qiact .btn { visibility: visible; }
-@media (hover: none) { .qiact .btn { visibility: visible; } }
+.qirow > a.row[data-sel] + .qiact .btn { opacity: 1; }
 .qires, .qiask {
   display: flex; flex-wrap: wrap; gap: 0 1ch; align-items: baseline;
   padding-left: 3.5ch;
@@ -126,6 +125,9 @@ input[type="text"]::placeholder { color: var(--ghost); }
 }
 .qires .qiline:hover { text-decoration: underline; text-underline-offset: 4px; }
 .qires .qiline:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
+
+/* dim key hint under every browse list (never in the entry detail) */
+.listhint { margin: 12px 0 0; }
 
 /* first-run onboarding: one question per screen ------------------------ */
 .onboard { max-width: 64ch; margin: 6vh auto 0; }
@@ -163,7 +165,7 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .project .setup { line-height: 24px; }
 
 /* adopt suggestions: next to the set-up slot, one line per folder, then the
-   quiet other… link (the only thing shown with no candidates) */
+   quiet adopt other… link (the only thing shown with no candidates) */
 .project .adopt-block { line-height: 24px; }
 .project .setup + .adopt-block { margin-top: 12px; }
 .project .adopt-block .found { margin: 0; }
@@ -179,7 +181,9 @@ input[type="text"]::placeholder { color: var(--ghost); }
    as a tree directly under its row */
 .presets .row .nm { flex: 0 0 var(--pw, 10ch); }
 .presets .row .desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.presets .row .lead, .pv .lead { flex: 1 1 0; min-width: 0; }
+/* truncated rows keep the same dotted leader as short ones, at least 2ch */
+.presets .row .lead { flex: 1 1 2ch; min-width: 2ch; }
+.pv .lead { flex: 1 1 0; min-width: 0; }
 .presets .row .cnt { flex: none; white-space: nowrap; }
 .pv { margin: 0 0 8px; padding-left: 2ch; }
 .pl { display: flex; align-items: baseline; gap: 0 1ch; min-width: 0; }
@@ -204,19 +208,17 @@ input[type="text"]::placeholder { color: var(--ghost); }
 }
 .phead .fold:hover { color: var(--accent); }
 .phead .fold:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
-.phead .pfilter { margin-left: auto; width: 24ch; max-width: 40%; color: var(--fg); }
-.presets .more {
-  justify-self: start; font: inherit; background: none; border: 0; padding: 0;
-  color: var(--dim); cursor: pointer; line-height: 24px;
-}
-.presets .more:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 4px; }
-.presets .more:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
+.phead .pfilter { margin-left: auto; margin-bottom: 4px; width: 24ch; max-width: 40%; color: var(--fg); }
+/* the cut toggle is a plain text button; only its grid placement is its own */
+.presets .more { justify-self: start; line-height: 24px; }
 .presets .none { margin: 0; line-height: 24px; }
 .pv + .pv, .preset > .raw { margin-left: 2ch; }
 
 .chip { flex: none; }
 .chip::before { content: "("; color: var(--dim); }
 .chip::after { content: ")"; color: var(--dim); }
+/* clean rows leave the slot blank (no marker, no parens) */
+.chip:empty::before, .chip:empty::after { content: none; }
 .chip.imported { color: var(--dim); }
 .chip.edited, .chip.update, .chip.gone { color: var(--accent); }
 

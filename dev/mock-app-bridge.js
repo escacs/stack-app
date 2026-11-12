@@ -209,6 +209,33 @@
     return `.stack/${id}`;
   };
 
+  // `--to` validation, mirroring the Rust join_inside (paths.rs): absolute
+  // paths and lexical `..` escapes are rejected with the same messages, so
+  // mock runs don't hide real errors. The symlink check needs a filesystem,
+  // so the mock skips it.
+  const checkTo = (to) => {
+    if (to == null) return null;
+    if (!to || to.length > 512) return 'invalid path';
+    if (to.startsWith('/') || /^[A-Za-z]:[\\/]/.test(to)) {
+      return 'use a project-relative path, not an absolute one';
+    }
+    let depth = 0;
+    for (const seg of to.split('/')) {
+      if (!seg || seg === '.') continue;
+      if (seg === '..') {
+        depth--;
+        if (depth < 0) return 'path escapes the project directory';
+      } else depth++;
+    }
+    return null;
+  };
+
+  // The look-alike files an import aimed at `dest` would collide with: a
+  // `--to` elsewhere sidesteps them, a `--to` on top of them refuses, exactly
+  // like the real import plan.
+  const clashUnder = (id, dest) =>
+    (fx.lookalikeFor?.[id] ?? []).filter((f) => dest === '.' || f === dest || f.startsWith(`${dest}/`));
+
   // ---------------------------------------------------------- preset fixtures
   // Rendered into the exact JSON shapes of `preset list/show/apply --json`.
 
@@ -602,6 +629,11 @@
   function stack({ subcommand: sub, args = [] }) {
     if (!fx.node.ok) return errOut('node 22+ is required (fixture: no-node scenario)');
     const { json, dryRun, kind, to, file, positional } = splitArgs(args);
+    // Same gate as the Rust argv builder: only import and preset apply take
+    // --dry-run (and only apply within preset; list/show reject it below).
+    if (dryRun && sub !== 'import' && sub !== 'preset') {
+      return errOut('--dry-run is only supported by import and preset apply');
+    }
     const visible = CATALOG.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
     switch (sub) {
       case 'list': {
@@ -659,6 +691,8 @@
       case 'import': {
         const ids = positional;
         if (to && ids.length > 1) return errOut('--to works with one id at a time');
+        const badTo = checkTo(to);
+        if (badTo) return errOut(badTo);
         const log = [];
         const imported = [];
         const already = [];
@@ -676,8 +710,8 @@
               already.push(id);
               continue;
             }
-            const clash = !to && fx.lookalikeFor?.[id];
-            if (clash) conflicts.push(...clash);
+            const clash = clashUnder(id, to || destFor(id));
+            if (clash.length) conflicts.push(...clash);
             imported.push({ id, path: to || destFor(id) });
           }
           if (!json) {
@@ -699,8 +733,8 @@
             already.push(id);
             continue;
           }
-          const clash = !to && fx.lookalikeFor?.[id];
-          if (clash) {
+          const clash = clashUnder(id, to || destFor(id));
+          if (clash.length) {
             return errOut(`these files already exist with other content; move them or choose --to:\n  ${clash.join('\n  ')}`);
           }
           const dest = to || destFor(id);
@@ -727,12 +761,19 @@
       }
       case 'preset': {
         const [action, name] = positional;
+        // Same gates as the Rust argv builder: no valued flags on any preset
+        // action, and --dry-run on apply only.
+        if (to != null || kind != null || file != null) {
+          return errOut('preset takes no --kind/--to/--ref/--file');
+        }
         if (action === 'list') {
+          if (dryRun) return errOut('preset list takes no --dry-run');
           const rows = presets().map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
           if (!json) return okOut(rows.length ? rows.map((p) => `- ${p.name}: ${p.description}`).join('\n') : 'No presets.');
           return jsonOut({ command: 'preset', action: 'list', count: rows.length, presets: rows });
         }
         if (action === 'show') {
+          if (dryRun) return errOut('preset show takes no --dry-run');
           const p = presets().find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           if (!json) {
@@ -757,8 +798,9 @@
           // written: collect every clash up front. A dry run reports them
           // as part of the plan instead of throwing.
           for (const imp of p.imports) {
-            const clash = !imp.to && !fx.lock.some((r) => r.id === imp.id) && fx.lookalikeFor?.[imp.id];
-            if (clash) conflicts.push(...clash);
+            if (!fx.lock.some((r) => r.id === imp.id)) {
+              conflicts.push(...clashUnder(imp.id, imp.to || destFor(imp.id)));
+            }
           }
           if (conflicts.length && !dryRun) {
             return errOut(`these files already exist with other content; move them or choose --to:\n  ${conflicts.join('\n  ')}`);

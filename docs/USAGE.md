@@ -156,8 +156,8 @@ project / browse                        mel  …/projects/folio
 - The user and project buttons go back to who and project (see above).
 
 Footer, bottom of the window, one quiet line: the app version, then
-`check for updates`, then `N update` or `N updates` when project imports
-have changes waiting. The update count opens the project page; the version's
+`check for updates`, then `N import update` or `N import updates` when
+project imports have changes waiting. The update count opens the project page; the version's
 tooltip names the stack checkout in use and where it came from
 (settings, env or auto). The updater stays on that same line: `checking…`,
 `up to date` (fades back to the link), `→ <version> available [install]`,
@@ -220,11 +220,12 @@ Each row shows the name, the status face, and the file count and size. A
 library.
 
 Every entry row carries a quiet `[import]` button at its right end. It
-shows while the row is hovered, focused or under the cursor, and stays
-visible on touch screens. One click imports with the default destination,
-without leaving the list. Rows this project already imported show
-`(imported)` instead; rows that cannot be imported (`not-committed`) show
-nothing.
+is always shown, dim while idle, and brightens while the row is hovered,
+focused or under the cursor. One click imports with the default
+destination, without leaving the list. Rows this project already imported
+show `(imported)` instead; rows that cannot be imported (`not-committed`)
+show nothing. A dim `↑↓ move · i import` line under each list names the
+list keys.
 
 ### all
 
@@ -344,7 +345,10 @@ one-line result appears under it for a few seconds:
 A click on that line expands the full import log. Pulled-in dependencies
 are mentioned briefly (`+1 dep`). On failure the short error shows
 instead, with a `[details]` button for the full error or the look-alike
-list. Only one import runs at a time.
+list. When a skill or style is refused for look-alikes, the same inline
+`to:` field opens under the error, prefilled with the default destination,
+so another destination can be chosen right there. Only one import runs at
+a time.
 
 Entries that belong in the source tree — components and other `copy`
 entries — are never imported blindly: their row button opens a small
@@ -385,13 +389,13 @@ imported from the stack, and presets. It needs a project. The old
 
 found in project: 1 look-alike entry     ← only when folders look like entries
 .agents/skills/ponytail → skills/ponytail (identical)  adopt
-other…
+adopt other…
 
-imported  skills/file-pr        @b51359b → .agents/skills/file-pr        remove
-imported  styles/folio-light    @b51359b → .agents/skills/folio-light    remove
-imported  workers/mel           @b51359b → .stack/workers/mel            remove
+          skills/file-pr        @b51359b → .agents/skills/file-pr        remove
+          styles/folio-light    @b51359b → .agents/skills/folio-light    remove
+          workers/mel           @b51359b → .stack/workers/mel            remove
 
-sync @b51359b
+sync stack @b51359b
 
 presets 2
 web   React starter: button plus the file-pr skill. . . .  all here   preview apply
@@ -411,7 +415,7 @@ update    skills/file-pr        @a1b2c3d → .agents/skills/file-pr        updat
 update    templates/agents-md   @a1b2c3d → .                             update  remove
           1 file changed upstream
 
-update all   sync @b51359b
+update all   sync stack @b51359b
 ```
 
 The `@…` value is the stack commit the import was made from.
@@ -420,13 +424,14 @@ The `@…` value is the stack commit the import was made from.
 
 | state | when | sub-line |
 |---|---|---|
-| `imported` | the files match the import and the stack has no newer content for them | none |
+| `imported` (no marker) | the files match the import and the stack has no newer content for them | none |
 | `edited` | at least one file differs from the import, or is missing | `edited: <files>` |
 | `update` | the stack's HEAD has different content for at least one file | `N files changed upstream` |
 | `gone` | the entry no longer exists at the stack's HEAD | `removed from stack` |
 
-The chip shows the first matching state in this order: `gone`, `update`,
-`edited`, `imported`. A row can be `update` and still list `edited:` files.
+Clean rows leave the marker slot blank; only rows needing attention print
+one, the first matching state in this order: `gone`, `update`, `edited`.
+A row can be `update` and still list `edited:` files.
 A deleted file counts as edited; `sync` restores it.
 
 ### Actions
@@ -439,7 +444,7 @@ A deleted file counts as edited; `sync` restores it.
 | `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
 | `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
 | `adopt` (one button per found folder) | a project folder looks like an entry that was never imported | records the folder's files in `stack.toml`: the same import as Browse, with the destination implied | differing files are listed and nothing is written |
-| `other…` | always | the manual fallback: an entry id (autocompleted from the catalog) plus an optional folder in this project | differing files are listed and nothing is written |
+| `adopt other…` | always | the manual fallback: an entry id (autocompleted from the catalog) plus an optional folder in this project | differing files are listed and nothing is written |
 | preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
 | preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
 
@@ -448,8 +453,10 @@ folders that look like stack entries but were never imported: a skills
 folder, a `.stack/<id>` folder, or a hand-placed component. Each line names
 the folder and the entry it matches, with `(identical)` when its files
 already match the entry or `(differs)` when any file differs, and one
-`adopt` button that records it. `other…` covers the rare folder the list
-misses: an entry id plus an optional folder in this project.
+`adopt` button that records it. `adopt other…` covers the rare folder the
+list misses: an entry id plus an optional folder in this project. A refused
+adopt names the differing files and the next step: move or delete them,
+then adopt again.
 
 Each action shows its result under the rows, as titled sections. A failed
 action shows the CLI's error text as it is. Only one action runs at a time;
@@ -472,8 +479,8 @@ way `import` does. Hover `apply` to see what it imports.
 
 A long list stays short on the page:
 
-- **Five rows, then `+N more`.** More than five presets show the first five.
-  `+N more` reveals the rest, `− fewer` goes back.
+- **Five rows, then `[+N more]`.** More than five presets show the first five.
+  `[+N more]` reveals the rest, `[− fewer]` goes back.
 - **Filter.** With more than eight presets a `filter…` field sits in the
   heading line. Type to narrow by name or description; every word you type
   must match (any case). The heading shows `3/12` while filtering. `Esc`
@@ -555,7 +562,7 @@ Every view decodes the CLI's `--json` output:
 | browse: entry | `show <id>`, and `show <id> --file <path>` for file bodies |
 | project rows | `status` |
 | presets | `preset list`; `preset apply <name>`; preview runs `preset apply <name> --dry-run` |
-| import, adopt, `other…` | `import`; each adopt hint is one `import --dry-run` |
+| import, adopt, `adopt other…` | `import`; each adopt hint is one `import --dry-run` |
 | update, update all | `update` |
 | remove, sync, init | `remove`, `sync`, `init` |
 
@@ -614,7 +621,7 @@ opens the project page, as an alias.
 | `many` | project page with three imports and 15 presets: the presets start collapsed |
 | `manyfresh` | plain folder with 15 presets: the set-up slot, presets open |
 | `lots` | three imports and 34 presets |
-| `adopt0` | project page with no adoptable folders: only the quiet `other…` link |
+| `adopt0` | project page with no adoptable folders: only the quiet `adopt other…` link |
 | `adopt1` | one adoptable folder next to `init stack.toml` |
 | `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
 | `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |

@@ -97,7 +97,7 @@ export default function App() {
               <span>
                 {' · '}
                 <a href={href(hash().scenario, 'project')}>
-                  {updates()} update{updates() === 1 ? '' : 's'}
+                  {updates()} import update{updates() === 1 ? '' : 's'}
                 </a>
               </span>
             </Show>

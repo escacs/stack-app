@@ -36,7 +36,7 @@ export default function StackSetup() {
         <button class="btn" disabled={busy()} onClick={() => void pick()}>
           {busy() ? 'picking' : 'pick stack folder'}
         </button>{' '}
-        <button class="linklike" onClick={() => void revalidateStack()}>re-check</button>
+        <button class="btn" onClick={() => void revalidateStack()}>re-check</button>
         <Show when={config()?.stackPath}>
           {' '}
           <button

@@ -47,6 +47,34 @@ export function conflictsFor(conflicts: string[], dest: string): string[] {
   return conflicts.filter((f) => f === dest || f.startsWith(`${dest}/`));
 }
 
+/**
+ * Run `fn` over `items` with at most `limit` promises in flight, keeping
+ * result order. A rolling pool: each freed slot takes the next item, so a
+ * slow item never idles the other slots the way fixed batches would.
+ */
+export async function mapPooled<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  const slots = Math.min(Math.max(1, Math.floor(limit)), items.length);
+  let next = 0;
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < slots; w++) {
+    workers.push(
+      (async () => {
+        while (next < items.length) {
+          const i = next++;
+          out[i] = await fn(items[i], i);
+        }
+      })(),
+    );
+  }
+  await Promise.all(workers);
+  return out;
+}
+
 function cleanFolder(folder: string): string | null {
   const f = folder.trim().replace(/\/+$/, '');
   if (!f || f === '.' || f.startsWith('/') || f.split('/').some((s) => !s || s === '.' || s === '..')) {
