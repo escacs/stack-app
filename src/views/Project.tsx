@@ -110,6 +110,10 @@ export default function Project(props: { scenario: string }) {
         setPickedHints({});
         hintedKey = '';
         pickedHintedKey = '';
+        // In-flight dry-run hints belong to the old project: bump both
+        // generations so they resolve stale and can't stick.
+        hintGen++;
+        pickedHintGen++;
       },
       { defer: true },
     ),
@@ -369,6 +373,9 @@ export default function Project(props: { scenario: string }) {
     setPickError(null);
     try {
       const rel = await pickAdoptFolder(c.project);
+      // The dialog outlives a project switch; a pick for the old project
+      // must not open a panel on the new one.
+      if (config()?.project !== c.project) return;
       // Cancel stays quiet: no panel, nothing cleared.
       if (rel == null) return;
       setPicked(rel);
@@ -467,7 +474,7 @@ export default function Project(props: { scenario: string }) {
         {/*
           Adopt sits next to the set-up slot: both are about things not in
           stack.toml yet. With candidates, one line each with its adopt
-          button; with none, only the quiet pick a folder… link. The picker
+          button; with none, only the quiet adopt a folder… link. The picker
           resolves the entry from the folder name, so no id is typed.
         */}
         <div class="adopt-block">
@@ -513,7 +520,7 @@ export default function Project(props: { scenario: string }) {
             disabled={!!pending() || picking()}
             onClick={() => void pickFlow()}
           >
-            {picking() ? 'picking…' : 'pick a folder…'}
+            {picking() ? 'picking…' : 'adopt a folder…'}
           </button>
           <Show when={pickOpen()}>
             <div class="adopt-picked">
@@ -553,7 +560,7 @@ export default function Project(props: { scenario: string }) {
                 }}
               </Show>
               <Show when={pickedCands().length > 1}>
-                <p class="dimtxt">several entries match this folder:</p>
+                <p class="dimtxt">{picked()} — several entries match this folder:</p>
                 <div class="adopt-list">
                   <For each={pickedCands()}>
                     {(cand) => {
@@ -585,7 +592,7 @@ export default function Project(props: { scenario: string }) {
                 </div>
               </Show>
               <Show when={picked() && pickedCands().length === 0}>
-                <p class="dimtxt">no stack entry matches this folder</p>
+                <p class="dimtxt">{picked()} — no stack entry matches this folder</p>
                 <form
                   class="adopt"
                   onSubmit={(e) => {

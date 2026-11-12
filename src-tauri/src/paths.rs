@@ -49,7 +49,12 @@ pub fn relative_inside(root: &Path, path: &Path) -> Result<String, String> {
     let mut parts: Vec<String> = Vec::new();
     for comp in rel.components() {
         match comp {
-            Component::Normal(c) => parts.push(c.to_string_lossy().into_owned()),
+            Component::Normal(c) => match c.to_str() {
+                Some(s) => parts.push(s.to_owned()),
+                // Never lossy-join: a mangled name would adopt the wrong
+                // folder or fail later with a confusing message.
+                None => return Err("folder name is not valid UTF-8".to_string()),
+            },
             _ => return Err("folder is outside this project".to_string()),
         }
     }
@@ -181,9 +186,39 @@ mod tests {
             relative_inside(&root, &outside.join("elsewhere")).unwrap_err(),
             "folder is outside this project"
         );
-        assert!(relative_inside(&root, &root).is_err());
+        assert_eq!(
+            relative_inside(&root, &root).unwrap_err(),
+            "pick a folder inside the project, not the project itself"
+        );
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn relative_inside_rejects_file() {
+        let root = tmp_root("relfile");
+        let f = root.join("notes.txt");
+        std::fs::write(&f, "x").unwrap();
+        assert_eq!(
+            relative_inside(&root, &f).unwrap_err(),
+            "pick a folder inside the project"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_inside_rejects_non_utf8_name() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let root = tmp_root("relutf8");
+        let bad = root.join(OsStr::from_bytes(b"bad-\xff-name"));
+        std::fs::create_dir_all(&bad).unwrap();
+        assert_eq!(
+            relative_inside(&root, &bad).unwrap_err(),
+            "folder name is not valid UTF-8"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

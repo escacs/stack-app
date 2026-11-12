@@ -389,7 +389,7 @@ imported from the stack, and presets. It needs a project. The old
 
 found in project: 1 look-alike entry     ← only when folders look like entries
 .agents/skills/ponytail → skills/ponytail (identical)  adopt
-pick a folder…
+adopt a folder…
 
           skills/file-pr        @b51359b → .agents/skills/file-pr        remove
           styles/folio-light    @b51359b → .agents/skills/folio-light    remove
@@ -444,7 +444,7 @@ A deleted file counts as edited; `sync` restores it.
 | `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
 | `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
 | `adopt` (one button per found folder) | a project folder looks like an entry that was never imported | records the folder's files in `stack.toml`: the same import as Browse, with the destination implied | differing files are listed and nothing is written |
-| `pick a folder…` | always | the manual fallback: a folder picker starting in the project. The entry is inferred from the folder name; several matches offer a choice, no match offers an entry-id field (autocompleted from the catalog) as the last resort | differing files are listed and nothing is written; a folder outside the project is refused |
+| `adopt a folder…` | always | the manual fallback: a folder picker starting in the project. The entry is inferred from the folder name; several matches offer a choice, no match offers an entry-id field (autocompleted from the catalog) as the last resort | differing files are listed and nothing is written; a folder outside the project is refused |
 | preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
 | preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
 
@@ -453,7 +453,7 @@ folders that look like stack entries but were never imported: a skills
 folder, a `.stack/<id>` folder, or a hand-placed component. Each line names
 the folder and the entry it matches, with `(identical)` when its files
 already match the entry or `(differs)` when any file differs, and one
-`adopt` button that records it. `pick a folder…` covers the rare folder the
+`adopt` button that records it. `adopt a folder…` covers the rare folder the
 list misses: a system folder picker starting in the project, confined to
 it (an outside folder is refused). The entry is inferred from the folder
 name and shown as the same one-line row with its dry-run hint; several
@@ -565,14 +565,14 @@ Every view decodes the CLI's `--json` output:
 | browse: entry | `show <id>`, and `show <id> --file <path>` for file bodies |
 | project rows | `status` |
 | presets | `preset list`; `preset apply <name>`; preview runs `preset apply <name> --dry-run` |
-| import, adopt, `pick a folder…` | `import`; each adopt hint is one `import --dry-run` |
+| import, adopt, `adopt a folder…` | `import`; each adopt hint is one `import --dry-run` |
 | update, update all | `update` |
 | remove, sync, init | `remove`, `sync`, `init` |
 
 The app adds `--offline` to `show` and `status`, which never need the
 network. `list` stays online. Adopt suggestions match a shell-side folder
 listing (the skills dirs, `src/components`, `.stack`) against the catalog
-by name; the `pick a folder…` choice is confined to the project by the
+by name; the `adopt a folder…` choice is confined to the project by the
 shell and its entry inferred from the folder name the same way. A failed
 command shows its error text: the CLI's stderr, or its stdout if stderr is
 empty.
@@ -626,7 +626,7 @@ opens the project page, as an alias.
 | `many` | project page with three imports and 15 presets: the presets start collapsed |
 | `manyfresh` | plain folder with 15 presets: the set-up slot, presets open |
 | `lots` | three imports and 34 presets |
-| `adopt0` | project page with no adoptable folders: only the quiet `pick a folder…` link |
+| `adopt0` | project page with no adoptable folders: only the quiet `adopt a folder…` link |
 | `adopt1` | one adoptable folder next to `init stack.toml` |
 | `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
 | `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |
@@ -644,7 +644,7 @@ streams progress), while `+update-error` fails checks. Without a suffix,
 checks answer up to date.
 
 A `+pick-<case>` suffix scripts the adopt folder picker:
-`#adopt3+pick-differing,/project` makes `pick a folder…` return a differing
+`#adopt3+pick-differing,/project` makes `adopt a folder…` return a differing
 folder. Cases are `matching` (identical), `differing`, `nomatch` (no entry
 matches, so the id field shows), `multi` (two same-named entries), `outside`
 (rejected like a real outside pick) and `cancel` (quiet, as if dismissed).
