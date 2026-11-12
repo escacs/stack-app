@@ -55,9 +55,12 @@ import {
   catalogs,
   buildIndex,
   byKindOrder,
+  clearCatalogs,
+  clearPreviews,
   crumbParts,
   previewCache,
   previewKey,
+  refreshLine,
   resolveRoute,
   sameRoute,
   sourceKey,
@@ -67,6 +70,7 @@ import {
   type CrumbTarget,
   type Route,
 } from '../browseData';
+import { RefreshButton, type RefreshState } from './BrowseRefresh';
 import {
   Bar,
   Face,
@@ -111,6 +115,8 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   const [entryFiles, setEntryFiles] = createSignal<ShowFile[]>([]);
   const [qi, setQi] = createSignal<QiState | null>(null);
   const [qiAsk, setQiAsk] = createSignal<{ id: string; value: string } | null>(null);
+  const [rs, setRs] = createSignal<RefreshState | null>(null);
+  const [entryBusy, setEntryBusy] = createSignal(false);
   let inputEl: HTMLInputElement | undefined;
   let listGen = 0;
   // Row-import generation, bumped on navigation and project switch: an
@@ -124,6 +130,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   };
   onCleanup(clearQiTimer);
+  let rsTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearRsTimer = (): void => {
+    if (rsTimer !== undefined) {
+      clearTimeout(rsTimer);
+      rsTimer = undefined;
+    }
+  };
+  onCleanup(clearRsTimer);
 
   // Changes only when the project or stack checkout does, never on config edits.
   const source = createMemo(() => sourceKey(config()));
@@ -222,6 +236,15 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }, ms);
   };
 
+  /** The refresh result clears itself after a few seconds, like an import line. */
+  const armRsTimer = (ms: number): void => {
+    clearRsTimer();
+    rsTimer = setTimeout(() => setRs(null), ms);
+  };
+
+  /** Any import op in flight: a row import here or the entry page's import. */
+  const importBusy = (): boolean => qi()?.phase === 'working' || entryBusy();
+
   const toggleQiFull = (): void => {
     const s = qi();
     if (!s || s.phase === 'working') return;
@@ -309,8 +332,15 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   /**
    * Stale-while-revalidate: a cached catalog renders at once and refreshes in
    * the background; `loading…` shows only when this source has no cache yet.
+   * Returns the outcome for the refresh button (null when a newer load
+   * superseded this one); `silent` skips the full-view error, and
+   * `keepStale` leaves the current list on screen while the reload runs,
+   * so a failed refresh keeps the stale list and shows its own error line
+   * instead.
    */
-  async function load(): Promise<void> {
+  async function load(
+    opts?: { silent?: boolean; keepStale?: boolean },
+  ): Promise<{ ok: true; count: number } | { ok: false; err: string } | null> {
     const c = config();
     const key = sourceKey(c);
     const gen = ++listGen;
@@ -319,7 +349,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       setEntries(cached.entries);
       setUncommitted(cached.uncommitted);
       setLoaded(true);
-    } else {
+    } else if (!opts?.keepStale) {
       setEntries([]);
       setUncommitted(new Set<string>());
       setLoaded(false);
@@ -327,10 +357,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     try {
       const out = await stackRun('list', ['--json'], c?.project ?? '.', c?.stackPath);
-      if (gen !== listGen) return;
+      if (gen !== listGen) return null;
       if (cached && cached.raw === out.stdout) {
         setNote(null);
-        return;
+        return { ok: true, count: cached.entries.length };
       }
       const data = fromStackOut<ListJson>(out);
       const next: CatalogData = {
@@ -342,11 +372,45 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       setEntries(next.entries);
       setUncommitted(next.uncommitted);
       setNote(null);
+      return { ok: true, count: next.entries.length };
     } catch (err) {
-      if (gen !== listGen) return;
-      setNote(errText(err));
+      if (gen !== listGen) return null;
+      const text = errText(err);
+      if (!opts?.silent) setNote(text);
+      return { ok: false, err: text };
     } finally {
       if (gen === listGen) setLoaded(true);
+    }
+  }
+
+  /**
+   * Re-read the catalog from the checkout from scratch: drop the cached
+   * list and every cached preview, then re-run the same online
+   * `list --json` the first load uses (stale remote libraries re-sync on
+   * the way — see stackArgs.ts — so no separate remote step; a `remote
+   * sync` would only matter for remote skills, which list never fetches).
+   * The imported markers reload too. The route and scroll position stay
+   * put, and the stack path is re-read from the config only, never
+   * re-validated (that would cost extra spawns for no new information).
+   */
+  async function refresh(): Promise<void> {
+    if (rs()?.phase === 'working' || importBusy()) return;
+    clearRsTimer();
+    setRs({ phase: 'working' });
+    clearCatalogs(sourceKey(config()));
+    clearPreviews();
+    const r = await load({ silent: true, keepStale: true });
+    if (!r) {
+      setRs(null);
+      return;
+    }
+    if (r.ok) {
+      await refreshLock();
+      setRs({ phase: 'done', line: refreshLine(r.count) });
+      armRsTimer(8000);
+    } else {
+      setRs({ phase: 'error', err: r.err });
+      armRsTimer(15000);
     }
   }
 
@@ -395,6 +459,13 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           return;
         }
       }
+      // `r` re-reads the catalog from the checkout. Like `i`, text fields
+      // keep it; unlike `i` it needs no cursor row.
+      if (ev.key === 'r' && t !== inputEl) {
+        ev.preventDefault();
+        void refresh();
+        return;
+      }
       if (ev.key === ' ' && !q()) {
         ev.preventDefault();
         scrollByPage(window.innerHeight * 0.8);
@@ -439,6 +510,8 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         clearQiTimer();
         setQi(null);
         setQiAsk(null);
+        clearRsTimer();
+        setRs(null);
       },
       { defer: true },
     ),
@@ -491,6 +564,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           spellcheck={false}
           onInput={(e) => setQ(e.currentTarget.value)}
         />
+        <RefreshButton state={rs()} disabled={importBusy()} onRefresh={() => void refresh()} />
       </div>
       <Show when={!note()} fallback={<CliErr text={note() as string} />}>
         <Switch>
@@ -552,6 +626,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
               fileHref={fileHref}
               onFiles={setEntryFiles}
               onImported={() => void load()}
+              onPending={setEntryBusy}
             />
           </Match>
           <Match when={route().kind === 'missing'}>
@@ -830,7 +905,7 @@ function QiAsk(props: {
 
 /** Dim key hint under every browse list (never in the entry detail). */
 function ListHint() {
-  return <p class="dimtxt listhint">↑↓ move · i import</p>;
+  return <p class="dimtxt listhint">↑↓ move · i import · r refresh</p>;
 }
 
 /** Flat entry list: the kind view, the `all` list and search results. */
@@ -996,6 +1071,8 @@ function EntryDetail(props: {
   fileHref: (id: string, file: string) => string;
   onFiles: (files: ShowFile[]) => void;
   onImported: () => void;
+  /** The entry page's import running or not (the header refresh stays disabled meanwhile). */
+  onPending: (pending: boolean) => void;
 }) {
   const [doc, setDoc] = createSignal<Doc | null>(null);
   const [error, setError] = createSignal<string | null>(null);
@@ -1094,6 +1171,7 @@ function EntryDetail(props: {
     if (!c?.project) return;
     const dest = to().trim();
     setPending(true);
+    props.onPending(true);
     setSections(null);
     setFailed(null);
     try {
@@ -1108,6 +1186,7 @@ function EntryDetail(props: {
       setFailed(errText(err));
     } finally {
       setPending(false);
+      props.onPending(false);
     }
   }
 

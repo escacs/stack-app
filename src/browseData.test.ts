@@ -6,10 +6,15 @@ import {
   CATALOG_NAME,
   buildIndex,
   byKindOrder,
+  catalogs,
+  clearCatalogs,
+  clearPreviews,
   createFetchCache,
   createLimiter,
   crumbParts,
+  previewCache,
   previewKey,
+  refreshLine,
   resolveRoute,
   sameRoute,
   sourceKey,
@@ -171,6 +176,31 @@ describe('sourceKey and previewKey', () => {
   });
 });
 
+describe('clearCatalogs and refreshLine', () => {
+  it('drops one source, or every source when omitted', () => {
+    catalogs.set('a', { raw: 'a', entries: [], uncommitted: new Set() });
+    catalogs.set('b', { raw: 'b', entries: [], uncommitted: new Set() });
+    clearCatalogs('a');
+    expect(catalogs.has('a')).toBe(false);
+    expect(catalogs.has('b')).toBe(true);
+    clearCatalogs();
+    expect(catalogs.size).toBe(0);
+  });
+
+  it('clearing an unknown source is a no-op', () => {
+    catalogs.set('a', { raw: 'a', entries: [], uncommitted: new Set() });
+    clearCatalogs('nope');
+    expect(catalogs.has('a')).toBe(true);
+    clearCatalogs();
+  });
+
+  it('names the entry count, singular included', () => {
+    expect(refreshLine(93)).toBe('refreshed · 93 entries');
+    expect(refreshLine(1)).toBe('refreshed · 1 entry');
+    expect(refreshLine(0)).toBe('refreshed · 0 entries');
+  });
+});
+
 describe('createLimiter', () => {
   it('never runs more than the limit at once, FIFO', async () => {
     const run = createLimiter(2);
@@ -267,6 +297,27 @@ describe('createFetchCache', () => {
     expect(await slow).toBe('a');
     alive = true;
     expect(await cache.load('gone', async () => 'b', () => alive)).toBe('b');
+  });
+
+  it('clear drops finished results, so the next load re-fetches', async () => {
+    const cache = createFetchCache<string | null>(3);
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      return 'v';
+    };
+    expect(await cache.load('k', run)).toBe('v');
+    cache.clear();
+    expect(cache.peek('k')).toBeUndefined();
+    expect(await cache.load('k', run)).toBe('v');
+    expect(calls).toBe(2);
+  });
+
+  it('clearPreviews empties the module-wide preview cache', async () => {
+    await previewCache.load('k', async () => 'data:x');
+    expect(previewCache.peek('k')).toBe('data:x');
+    clearPreviews();
+    expect(previewCache.peek('k')).toBeUndefined();
   });
 
   it('a live caller that joined a skipped fetch retries instead of coming back empty', async () => {
