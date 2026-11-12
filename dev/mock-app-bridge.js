@@ -10,7 +10,8 @@
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
 // imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
-// adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs).
+// adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs),
+// quickimport (one of each inline-import row state).
 // A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
@@ -523,6 +524,31 @@
     many: () => ({ ...SCENARIOS.populated(), presets: makePresets(15) }),
     manyfresh: () => ({ ...SCENARIOS.fresh(), presets: makePresets(15) }),
     lots: () => ({ ...SCENARIOS.populated(), presets: makePresets(40) }),
+    // Inline row imports: all four row states in one catalog.
+    // skills/file-pr is already imported (the `(imported)` row);
+    // skills/ponytail imports plain with the default destination;
+    // components/react/button needs a --to and pulls icon-button (+1 dep);
+    // styles/folio-light refuses with look-alikes unless given a --to.
+    quickimport: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({
+        path, valid: true,
+        markers: ['stack.toml', '.agents/skills', '.git'],
+        errors: [],
+      }),
+      lock: [
+        { id: 'skills/file-pr', commit: FULL, path: '.agents/skills/file-pr', local: [], upstream: [] },
+      ],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      lookalikeFor: {
+        'styles/folio-light': ['.agents/skills/folio-light/SKILL.md', '.agents/skills/folio-light/theme.json'],
+      },
+    }),
     // First-run gate: nothing validates, the app must show StackSetup.
     'bad-stack': () => ({
       config: { ...baseConfig, stackPath: null, worker: null, project: null },

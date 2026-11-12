@@ -617,6 +617,7 @@ opens the project page, as an alias.
 | `adopt0` | project page with no adoptable folders: only the quiet `other…` link |
 | `adopt1` | one adoptable folder next to `init stack.toml` |
 | `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
+| `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |
 | `bad-stack` | the stack checkout setup screen |
 | `no-node` | the setup screen with node missing |
 
