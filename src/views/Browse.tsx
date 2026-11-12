@@ -67,6 +67,8 @@ import {
   buildIndex,
   byKindOrder,
   crumbParts,
+  dragPassed,
+  mayMoveFocusToImport,
   notImportedIds,
   previewCache,
   previewKey,
@@ -1230,14 +1232,17 @@ function BatchBar(props: {
   let confirmBar: HTMLDivElement | undefined;
   let importBtn: HTMLButtonElement | undefined;
   // Focus [import] once the confirm is actionable, unless the user already
-  // moved into the bar (e.g. typing in `to:`). The button remounts with
-  // every confirm, so the marker fires once per confirm.
+  // moved into the bar or is typing in a text field anywhere (search, an
+  // inline `to:` ask, the confirm's own base field): stealing focus
+  // mid-typing drops keystrokes. The button remounts with every confirm,
+  // so the marker fires once per confirm.
   createEffect(() => {
     const b = confirm();
     if (!b || b.checking || !importBtn) return;
     if (importBtn.dataset.armed) return;
     importBtn.dataset.armed = '1';
-    if (!confirmBar?.contains(document.activeElement)) importBtn.focus();
+    const active = document.activeElement as (HTMLElement & { type?: string }) | null;
+    if (!confirmBar?.contains(active) && mayMoveFocusToImport(active)) importBtn.focus();
   });
   return (
     <>
@@ -1317,7 +1322,7 @@ function BatchBar(props: {
       <Show when={running()}>
         {(b) => (
           <div class="batchbar">
-            <span>{`${b().label}: importing ${b().targets[b().at]?.id ?? ''} (${b().at + 1} of ${b().targets.length})`}</span>
+            <span role="status">{`${b().label}: importing ${b().targets[b().at]?.id ?? ''} (${b().at + 1} of ${b().targets.length})`}</span>
             <button class="linklike" title="stop after the current entry" onClick={() => props.onCancel()}>
               cancel
             </button>
