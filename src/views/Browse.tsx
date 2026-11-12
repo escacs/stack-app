@@ -376,6 +376,9 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       // Import creates stack.toml implicitly: the project page's set-up slot
       // must re-check on the next visit.
       await refreshReport();
+      // Same staleness gap as the batch tail: a navigation during the final
+      // refresh must not re-arm or reload here; the op still ends.
+      if (!previewFresh(gen, qiGen)) return endOp();
       void load();
       armQiTimer(8000);
       endOp();
@@ -677,6 +680,12 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     setLanded(new Set<string>());
     await refreshReport();
+    // A route or project change during the final refresh must not land the
+    // summary on the new route; the op still ends so the lock releases.
+    if (!previewFresh(gen, qiGen)) {
+      endOp();
+      return;
+    }
     void load();
     setSelected(new Set<string>());
     anchor = null;
