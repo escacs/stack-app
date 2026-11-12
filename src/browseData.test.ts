@@ -4,15 +4,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   CATALOG_NAME,
+  applyRange,
   buildIndex,
   byKindOrder,
   createFetchCache,
   createLimiter,
   crumbParts,
+  dragPassed,
+  mayMoveFocusToImport,
+  notImportedIds,
   previewKey,
+  rangeIds,
   resolveRoute,
   sameRoute,
   sourceKey,
+  toggleSelected,
   type Route,
 } from './browseData';
 import type { JsonEntry } from './json';
@@ -143,6 +149,40 @@ describe('buildIndex', () => {
     const idx = buildIndex([]);
     expect(idx.byId.size).toBe(0);
     expect(idx.citedBy.size).toBe(0);
+  });
+});
+
+describe('selection model', () => {
+  it('toggles one id without touching the input set', () => {
+    const prev = new Set(['a']);
+    expect([...toggleSelected(prev, 'b')].sort()).toEqual(['a', 'b']);
+    expect([...toggleSelected(prev, 'a')]).toEqual([]);
+    expect([...prev]).toEqual(['a']);
+  });
+
+  it('ranges inclusively between anchor and focus, either direction', () => {
+    const order = ['a', 'b', 'c', 'd'];
+    expect(rangeIds(order, 'b', 'd')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(order, 'd', 'b')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(order, 'c', 'c')).toEqual(['c']);
+  });
+
+  it('a missing anchor or focus selects just the focus row, or nothing', () => {
+    const order = ['a', 'b', 'c'];
+    expect(rangeIds(order, null, 'b')).toEqual(['b']);
+    expect(rangeIds(order, 'gone', 'b')).toEqual(['b']);
+    expect(rangeIds(order, 'a', 'gone')).toEqual([]);
+  });
+
+  it('applies a range by replace, or by union when additive', () => {
+    expect([...applyRange(new Set(['x']), ['a', 'b'], false)].sort()).toEqual(['a', 'b']);
+    expect([...applyRange(new Set(['x']), ['a', 'b'], true)].sort()).toEqual(['a', 'b', 'x']);
+  });
+
+  it('`a` picks every not-imported row in list order, committed or not', () => {
+    const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(notImportedIds(rows, new Set(['b']))).toEqual(['a', 'c']);
+    expect(notImportedIds(rows, new Set())).toEqual(['a', 'b', 'c']);
   });
 });
 
@@ -285,5 +325,33 @@ describe('createFetchCache', () => {
     expect(await joiner).toBe('retried');
     expect(runs).toBe(1);
     expect(await busy).toBe('a');
+  });
+});
+
+describe('dragPassed', () => {
+  it('ignores a stationary cursor (the bar-shift synthetic enter), accepts a real drag', () => {
+    expect(dragPassed(100, 200, 100, 200)).toBe(false);
+    expect(dragPassed(100, 200, 102, 203)).toBe(false);
+    expect(dragPassed(100, 200, 100, 205)).toBe(true);
+    expect(dragPassed(100, 200, 100, 220)).toBe(true);
+  });
+});
+
+describe('mayMoveFocusToImport', () => {
+  it('holds focus while typing in any text field', () => {
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'text' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'search' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'TEXTAREA' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'SELECT' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'DIV', isContentEditable: true })).toBe(false);
+  });
+
+  it('moves focus from body, list rows and buttons', () => {
+    expect(mayMoveFocusToImport(null)).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'BODY' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'A' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'BUTTON' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'checkbox' })).toBe(true);
   });
 });

@@ -11,8 +11,9 @@
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
 // imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
 // adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs),
-// quickimport (one of each inline-import row state), no-auth, no-cli,
-// cli-foreign, cli-elsewhere, no-path.
+// quickimport (one of each inline-import row state), batchimport (an
+// eight-member component library plus an already-imported row and two
+// refusals), no-auth, no-cli, cli-foreign, cli-elsewhere, no-path.
 // A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
@@ -577,6 +578,40 @@
         'styles/folio-light': ['.agents/skills/folio-light/SKILL.md', '.agents/skills/folio-light/theme.json'],
       },
     }),
+    // Batch import: the components kind holds ten entries (react plus an
+    // eight-member batch library). batch/avatar and skills/file-pr are
+    // already imported; styles/folio-light refuses at its default
+    // destination and batch/card refuses under the conventional
+    // src/components base (any other base imports it fine).
+    batchimport: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({
+        path, valid: true,
+        markers: ['stack.toml', '.agents/skills', '.git'],
+        errors: [],
+      }),
+      lock: [
+        { id: 'skills/file-pr', commit: FULL, path: '.agents/skills/file-pr', local: [], upstream: [] },
+        { id: 'components/batch/avatar', commit: FULL, path: 'src/components/avatar', local: [], upstream: [] },
+      ],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      extraCatalog: ['card', 'dialog', 'input', 'select', 'tabs', 'tooltip', 'avatar', 'badge'].map((n) => ({
+        id: `components/batch/${n}`,
+        usage: 'copy',
+        status: 'experimental',
+        summary: `Batch library ${n} component (fixture).`,
+        library: { name: 'batch', extends: null, default: false },
+      })),
+      lookalikeFor: {
+        'styles/folio-light': ['.agents/skills/folio-light/SKILL.md', '.agents/skills/folio-light/theme.json'],
+        'components/batch/card': ['src/components/card/README.md', 'src/components/card/stack.json'],
+      },
+    }),
     // First-run gate: nothing validates, the app must show StackSetup.
     // get stack clones and the gate lifts (see the provision_stack handler).
     'bad-stack': () => ({
@@ -677,7 +712,8 @@
     if (dryRun && sub !== 'import' && sub !== 'preset') {
       return errOut('--dry-run is only supported by import and preset apply');
     }
-    const visible = CATALOG.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
+    const catalog = [...CATALOG, ...(fx.extraCatalog ?? [])];
+    const visible = catalog.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
     switch (sub) {
       case 'list': {
         const rows = visible.filter((e) => kindMatch(e, positional[0]));
@@ -749,17 +785,27 @@
             if (!e || e.committed === false) {
               return errOut(`${id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
             }
-            if (fx.lock.some((r) => r.id === id)) {
+            // An id the plan already pulled in as a dep counts as already
+            // here, like the real import (which sees it in the lock by then).
+            if (fx.lock.some((r) => r.id === id) || imported.some((p) => p.id === id)) {
               already.push(id);
               continue;
             }
             const clash = clashUnder(id, to || destFor(id));
             if (clash.length) conflicts.push(...clash);
             imported.push({ id, path: to || destFor(id) });
+            // Same auto-import of requires as the real import below. A dry
+            // run writes nothing, so dedupe against the plan as well as the
+            // lock (the real path dedupes through the lock it updates).
+            for (const req of e.requires ?? []) {
+              if (!fx.lock.some((r) => r.id === req) && !imported.some((p) => p.id === req)) {
+                imported.push({ id: req, path: destFor(req), requiredBy: id });
+              }
+            }
           }
           if (!json) {
             return okOut([
-              ...imported.map((p) => `import  ${p.id} -> ${p.path}`),
+              ...imported.map((p) => `import  ${p.id} -> ${p.path}${p.requiredBy ? ` (required by ${p.requiredBy})` : ''}`),
               ...conflicts.map((c) => `CONFLICT ${c} (exists with other content; a real import would abort)`),
               'dry run: nothing written',
             ].join('\n'));

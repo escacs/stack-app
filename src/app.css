@@ -102,8 +102,38 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .libgroup .rows { padding-left: 2ch; }
 
 /* quick import on browse rows ----------------------------------------- */
-.qirow { display: flex; align-items: baseline; }
+.qirow { display: flex; align-items: baseline; position: relative; }
 .qirow > a.row { flex: 1 1 auto; min-width: 0; }
+/* selection gutter: a 2ch press target in the cursor margin (the `>` sits
+   at -3ch), so rows keep their width. `*` marks selected rows, `+` hints
+   the press on hover. No layout shift: absolutely positioned. */
+.qi .gut {
+  position: absolute; left: -2ch; top: 0; width: 2ch; height: 100%;
+  text-align: center; color: var(--dim); cursor: pointer;
+  user-select: none; -webkit-user-select: none;
+}
+.qi .gut[data-on]::before { content: "*"; color: var(--accent); }
+.qi:hover .gut:not([data-on])::before { content: "+"; color: var(--ghost); }
+.qi[data-checked] .row .nm { color: var(--accent); }
+/* import-all header above a flat list: count left, button right */
+.listhead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0 2ch; margin: 0 0 4px;
+}
+.libhead .libimport { margin-left: auto; opacity: .45; }
+.libgroup:hover .libimport, .libhead:focus-within .libimport { opacity: 1; }
+/* batch bar: one quiet sticky line under the prompt (selection actions,
+   dry-run confirm, running progress, summary). Details hang below it. */
+.batchbar {
+  position: sticky; top: 40px; z-index: 40;
+  display: flex; flex-wrap: wrap; gap: 0 1.5ch; align-items: baseline;
+  background: var(--bg); padding: 4px 0; margin-bottom: 8px;
+}
+.batchbar > .raw, .batchbar > .batchref { flex: 1 0 100%; }
+.batchbar > .raw { margin: 4px 0 8px; max-width: none; }
+.batchref { margin: 4px 0; }
+.batchref > .raw { margin: 2px 0 6px; }
+.batchref > .conflict { display: block; }
 /* the cursor follows the whole row, including the action slot */
 .qi:hover .row::before { content: ">"; color: var(--dim); }
 .qiact { flex: none; min-width: 10ch; text-align: right; margin-left: 1ch; }
