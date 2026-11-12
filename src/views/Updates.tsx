@@ -1,15 +1,20 @@
-// App line: running version, a manual update check, then install with
-// progress and relaunch. A newer build found by the startup check is offered
-// here too. Lives in the footer settings, not on the project page: it is
-// about the app, not the project. Errors surface verbatim.
-import { Show, createSignal } from 'solid-js';
+// Footer updater: one quiet segment of the footer line. Idle it is just
+// `check for updates`; every state stays on that same line: `checking…`,
+// `up to date` (fades back to the link after a few seconds),
+// `→ <version> available [install]`, download progress, `[relaunch]`.
+// Errors show short and dim with the full text in a tooltip; `[retry]`
+// re-runs the failed step. A newer build found by the startup check
+// (store.appUpdate) offers install without a click. About the app, not
+// the project — hence the footer.
+import { Match, Switch, createSignal, onCleanup } from 'solid-js';
 import { errText } from '../bridge';
-import { fmtBytes } from '../parse';
-import { appUpdate, appVersion } from '../store';
+import { appUpdate, setAppUpdate } from '../store';
 import {
   checkForUpdate,
   downloadAndInstallUpdate,
+  formatUpdateProgress,
   relaunchApp,
+  shortenError,
   type Update,
   type UpdateProgress,
 } from '../updater';
@@ -20,33 +25,53 @@ export function Updates() {
   const [update, setUpdate] = createSignal<Update | null>(null);
   const [progress, setProgress] = createSignal<UpdateProgress | null>(null);
   const [installed, setInstalled] = createSignal(false);
-  const [status, setStatus] = createSignal<string | null>(null);
+  const [fresh, setFresh] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [failedOp, setFailedOp] = createSignal<'check' | 'install' | 'relaunch'>('check');
 
   // Version on offer: a manual check's handle, else the startup check's.
   const offered = () => update()?.version ?? appUpdate();
   const busy = () => checking() || installing();
 
+  // `up to date` lingers, then fades back to the link.
+  let freshTimer: ReturnType<typeof setTimeout> | null = null;
+  onCleanup(() => {
+    if (freshTimer) clearTimeout(freshTimer);
+  });
+  function showFresh() {
+    setFresh(true);
+    if (freshTimer) clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => setFresh(false), 4000);
+  }
+
   async function check() {
+    if (busy()) return;
     setChecking(true);
     setError(null);
-    setStatus(null);
+    setFresh(false);
     setProgress(null);
     setInstalled(false);
     try {
       const u = await checkForUpdate();
       setUpdate(u);
-      if (!u) setStatus('up to date');
+      if (!u) {
+        // A fresh "nothing" supersedes the startup check's offer, if any.
+        setAppUpdate(null);
+        showFresh();
+      }
     } catch (err) {
       setError(errText(err));
+      setFailedOp('check');
     } finally {
       setChecking(false);
     }
   }
 
   async function install() {
+    if (busy()) return;
     setInstalling(true);
     setError(null);
+    setFresh(false);
     setProgress(null);
     try {
       let u: Update | null = update();
@@ -55,16 +80,17 @@ export function Updates() {
         // fresh check yields one.
         u = await checkForUpdate();
         if (!u) {
-          setStatus('up to date');
+          setAppUpdate(null);
+          showFresh();
           return;
         }
         setUpdate(u);
       }
       await downloadAndInstallUpdate(u, (p) => setProgress({ ...p }));
       setInstalled(true);
-      setStatus(`installed ${u.version}`);
     } catch (err) {
       setError(errText(err));
+      setFailedOp('install');
     } finally {
       setInstalling(false);
     }
@@ -76,52 +102,68 @@ export function Updates() {
       await relaunchApp();
     } catch (err) {
       setError(errText(err));
+      setFailedOp('relaunch');
     }
   }
 
-  const progressText = () => {
-    const p = progress();
-    if (!p) return null;
-    if (p.done) return `downloaded ${fmtBytes(p.downloaded)}`;
-    if (p.total) {
-      const pct = Math.round((p.downloaded / p.total) * 100);
-      return `${fmtBytes(p.downloaded)} / ${fmtBytes(p.total)} (${pct}%)`;
-    }
-    return `${fmtBytes(p.downloaded)}…`;
-  };
+  function retry() {
+    const op = failedOp();
+    if (op === 'install') void install();
+    else if (op === 'relaunch') void relaunch();
+    else void check();
+  }
 
   return (
-    <>
-      <p class="dimtxt">
-        app {appVersion() ?? '?'}
-        <Show when={offered()}>
-          <span> → {offered()}</span>
-        </Show>{' '}
-        <button class="btn" disabled={busy()} onClick={() => void check()}>
-          {checking() ? 'working' : 'check'}
+    <Switch>
+      <Match when={error()}>
+        {(full) => (
+          <span>
+            <span class="fadein" role="alert" title={full()}>
+              {shortenError(full())}
+            </span>{' '}
+            <button class="btn" onClick={retry}>
+              retry
+            </button>
+          </span>
+        )}
+      </Match>
+      <Match when={installing()}>
+        <span class="fadein">{formatUpdateProgress(progress()) ?? 'installing…'}</span>
+      </Match>
+      <Match when={installed()}>
+        <button
+          class="btn fadein"
+          title={offered() ? `relaunch to use ${offered()}` : 'relaunch to use the installed update'}
+          onClick={() => void relaunch()}
+        >
+          relaunch
         </button>
-        <Show when={offered() && !installed()}>
-          {' '}
-          <button
-            class="btn"
-            title={update()?.body ?? 'download and install'}
-            disabled={busy()}
-            onClick={() => void install()}
-          >
-            {installing() ? 'working' : 'install'}
-          </button>
-        </Show>
-        <Show when={installed()}>
-          {' '}
-          <button class="btn" onClick={() => void relaunch()}>relaunch</button>
-        </Show>
-      </p>
-      <Show when={installing() ? progressText() : status()}>
-        {(t) => <p class="dimtxt">{t()}</p>}
-      </Show>
-      <Show when={error()}>
-        <p class="conflict" role="alert">{error()}</p>
-      </Show>
-    </>
+      </Match>
+      <Match when={checking()}>
+        <span class="fadein">checking…</span>
+      </Match>
+      <Match when={fresh()}>
+        <span class="fadein">up to date</span>
+      </Match>
+      <Match when={offered()}>
+        {(v) => (
+          <span>
+            <span class="fadein">→ {v()} available</span>{' '}
+            <button
+              class="btn"
+              title={update()?.body ?? 'download and install'}
+              onClick={() => void install()}
+            >
+              install
+            </button>
+          </span>
+        )}
+      </Match>
+      <Match when={true}>
+        <button class="linklike fadein" onClick={() => void check()}>
+          check for updates
+        </button>
+      </Match>
+    </Switch>
   );
 }

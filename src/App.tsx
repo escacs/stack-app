@@ -1,20 +1,26 @@
 import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
-import { actionError, appUpdate, appVersion, boot, bootError, config, configNotice, lock, projectDone, stack, whoDone, workerSkipped } from './store';
+import { actionError, appVersion, boot, bootError, config, configNotice, lock, projectDone, stack, whoDone, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash, resolveView } from './router';
 import TitleBar from './views/TitleBar';
 import TopBar from './views/TopBar';
 import Browse from './views/Browse';
 import Project from './views/Project';
-import { StackPath } from './views/StackPath';
 import { Updates } from './views/Updates';
 import StackSetup from './views/StackSetup';
 import { onboardStep } from './onboard';
 import { ProjectScreen, WhoScreen } from './views/Onboard';
 
+// The stack checkout in use, discoverable from the version tooltip — the
+// footer shows the folder nowhere else. `source` is settings, env or auto.
+function stackTip(): string {
+  const s = stack();
+  if (!s?.path) return 'stack checkout not found';
+  return `stack ${s.path} (${s.source})`;
+}
+
 export default function App() {
   const [hash, setHash] = createSignal(parseHash(location.hash));
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const onHash = () => setHash(parseHash(location.hash));
   onMount(() => {
     addEventListener('hashchange', onHash);
@@ -77,20 +83,16 @@ export default function App() {
       </main>
       <Show when={!step()}>
         <footer class="appfoot">
-          <Show when={settingsOpen()}>
-            <StackPath />
-            <Updates />
-          </Show>
           <span class="dimtxt">
-            <Show when={appVersion()}>{(v) => <span>{v()}</span>}</Show>
-            <Show when={appUpdate()}>
+            <Show when={appVersion()}>
               {(v) => (
                 <span>
+                  <span title={stackTip()}>{v()}</span>
                   {' · '}
-                  <a href={href(hash().scenario, 'project')}>→ {v()} available</a>
                 </span>
               )}
             </Show>
+            <Updates />
             <Show when={updates() > 0}>
               <span>
                 {' · '}
@@ -99,14 +101,6 @@ export default function App() {
                 </a>
               </span>
             </Show>
-            {' · '}
-            <button
-              class="linklike"
-              aria-expanded={settingsOpen()}
-              onClick={() => setSettingsOpen(!settingsOpen())}
-            >
-              settings
-            </button>
           </span>
         </footer>
       </Show>

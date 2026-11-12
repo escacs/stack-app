@@ -17,15 +17,16 @@ plus `@tauri-apps/plugin-process 2.4.0` for relaunch).
 - That endpoint fetches without credentials, so the repo must stay public
   (or the URL otherwise reachable without auth). Flipping the repo private
   makes every update check 404: the startup check logs it to stderr and the
-  settings check shows it verbatim, but no install will ever see an update.
+  footer check shows it short (full text in a tooltip), but no install will
+  ever see an update.
 - Every artifact is signed at build time with the secret key whose public
   half is baked into `tauri.conf.json` as `plugins.updater.pubkey`. The app
   verifies that signature before installing anything.
 - At startup the shell does one silent, non-blocking update check
-  (`src-tauri/src/lib.rs` setup hook) and ignores the result. The manual
-  flow lives in the footer `settings` (`src/views/Updates.tsx`,
+  (`src-tauri/src/lib.rs` setup hook) and offers a newer release in the
+  footer. The manual flow lives in the footer line (`src/views/Updates.tsx`,
   helpers in `src/updater.ts`): check for updates, download & install with progress,
-  then relaunch. Errors are shown verbatim.
+  then relaunch. Errors show short and dim with the full text in a tooltip.
 - On Linux the supported self-update path is the AppImage bundle (the new
   file replaces the old one). `latest.json` also carries `deb` and `rpm`
   entries, and a deb/rpm-installed copy will try to self-update through
@@ -69,9 +70,9 @@ git tag v0.2.0
 git push origin main v0.2.0
 ```
 
-Watch the `release` workflow, then install the previous bundle somewhere,
-open settings, and check for updates. The version in the tag and the three
-version fields must agree, otherwise the updater sees no newer release.
+Watch the `release` workflow, then install the previous bundle somewhere
+and press `check for updates` in the footer. The version in the tag and the
+three version fields must agree, otherwise the updater sees no newer release.
 
 ## Key rotation
 

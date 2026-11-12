@@ -50,8 +50,8 @@ pub fn run() {
             // Non-blocking update check at startup. Failures go to stderr
             // (a 404 here once meant the releases page was unreachable, and
             // swallowing it hid that for a whole release); a newer release
-            // emits UPDATE_AVAILABLE_EVENT for the footer badge. The settings
-            // view offers a manual check plus download/install/relaunch.
+            // emits UPDATE_AVAILABLE_EVENT for the footer. The footer line
+            // offers a manual check plus download/install/relaunch.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let updater = match handle.updater() {

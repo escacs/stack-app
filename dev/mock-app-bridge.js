@@ -9,11 +9,24 @@
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
-// imports), manyfresh (15 presets, no stack.toml), lots (36 presets).
+// imports), manyfresh (15 presets, no stack.toml), lots (36 presets). A
+// `+update-available` or `+update-error` suffix on any scenario drives the
+// footer updater fixture (e.g. `#populated+update-available,/project`):
+// the former answers checks with 0.1.9 and fires the startup update event,
+// the latter fails checks.
 (() => {
   'use strict';
 
-  const scenario = ((location.hash || '#populated').slice(1).split(',')[0] || '').split('/')[0] || 'populated';
+  const rawScenario = ((location.hash || '#populated').slice(1).split(',')[0] || '').split('/')[0] || 'populated';
+  const [scenario, ...flags] = rawScenario.split('+');
+  // Footer updater fixture: 'available' offers 0.1.9 (check answers it and
+  // the startup event fires), 'error' fails checks, otherwise up to date.
+  const updaterMode = flags.includes('update-available')
+    ? 'available'
+    : flags.includes('update-error')
+      ? 'error'
+      : 'none';
+  const UPDATE_VERSION = '0.1.9';
 
   // ---------------------------------------------------------------- catalog
   // Rendered into the exact JSON shapes of tools/stack/cli.mjs --json (and
@@ -478,7 +491,7 @@
         path: '', valid: false, source: 'missing',
         git: false, cli: false,
         node: { ok: true, version: 'v22.14.0', major: 22, error: null },
-        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone in settings (the folder containing tools/stack/cli.mjs).',
+        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it.',
       },
       report: (path) => ({ path, valid: true, markers: [], errors: [] }),
       lock: [],
@@ -786,7 +799,60 @@
 
   // ---------------------------------------------------------------- handlers
 
+  // Callback registry behind the mocked transformCallback, so the updater
+  // plugin's Channel and the startup update-event listen() work.
+  let nextCallbackId = 1;
+  const callbacks = new Map();
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Invented release behind the updater fixture (see the +update-* flags).
+  const updateMetadata = () => ({
+    rid: 1,
+    currentVersion: '0.1.0',
+    version: UPDATE_VERSION,
+    date: '2026-11-12T00:00:00Z',
+    body: 'Fixture release notes for the footer updater states.',
+    rawJson: { version: UPDATE_VERSION, notes: 'fixture', pub_date: '2026-11-12T00:00:00Z' },
+  });
+
+  async function mockDownloadAndInstall(a) {
+    // Streams Started/Progress/Finished at the Channel the plugin passed,
+    // the way the Rust side would; slow enough to screenshot mid-flight.
+    const ch = a?.onEvent;
+    const emit = (m) => ch?.onmessage?.(m);
+    const total = 3145728;
+    emit({ event: 'Started', data: { contentLength: total } });
+    for (let i = 0; i < 4; i++) {
+      await sleep(250);
+      emit({ event: 'Progress', data: { chunkLength: total / 4 } });
+    }
+    await sleep(250);
+    emit({ event: 'Finished', data: {} });
+    return null;
+  }
+
   const handlers = {
+    // Updater plugin surface (the footer drives these; install streams
+    // progress, relaunch and close are silent no-ops).
+    'plugin:updater|check': async () => {
+      await sleep(700);
+      if (updaterMode === 'error') throw 'fixture: the release feed is unreachable (mock +update-error)';
+      return updaterMode === 'available' ? updateMetadata() : null;
+    },
+    'plugin:updater|download_and_install': mockDownloadAndInstall,
+    'plugin:process|restart': async () => null,
+    'plugin:resources|close': async () => null,
+    // Event listen: only the startup update event is emulated, and only
+    // under +update-available (fires once, shortly after boot subscribes).
+    'plugin:event|listen': async ({ event, handler }) => {
+      if (event === 'stack://update-available' && updaterMode === 'available') {
+        const cb = callbacks.get(handler);
+        if (cb) setTimeout(() => cb({ event, payload: { version: UPDATE_VERSION } }), 400);
+      }
+      return nextCallbackId++;
+    },
+    'plugin:event|unlisten': async () => null,
     pick_folder: async () => fx.pick,
     get_config: async () => structuredClone(fx.config),
     save_config: async ({ config }) => {
@@ -830,6 +896,14 @@
         return null;
       }
       return fn(args);
+    },
+    transformCallback: (cb) => {
+      const id = nextCallbackId++;
+      callbacks.set(id, cb);
+      return id;
+    },
+    unregisterCallback: (id) => {
+      callbacks.delete(id);
     },
     // No-op event surface; the shell currently emits no events.
     listen: async () => () => {},

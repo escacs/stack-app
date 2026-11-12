@@ -211,13 +211,15 @@ python3 -I -m http.server 8137 --bind 127.0.0.1 --directory "$out"
 Open `http://127.0.0.1:8137/#<scenario>,/<route>`, for example
 `#conflicts,/project`. `dev/mock-app-bridge.js` reads the scenario from the
 hash: `populated` (default), `empty`, `noworker`, `noproject`, `scan`,
-`conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`. Reload
-the page to switch scenario; a hash-only change keeps the old fixture.
-`docs/USAGE.md` §8 lists what each one shows.
+`conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`. A
+`+update-available` or `+update-error` suffix on any scenario drives the
+footer updater fixture (invented 0.1.9, emulated startup event and
+download progress). Reload the page to switch scenario; a hash-only change
+keeps the old fixture. `docs/USAGE.md` §8 lists what each one shows.
 
-The mock cannot exercise the native folder picker, the update feed, the
-startup update event, or real file writes, and its `plugin:app|version` answer
-(0.1.0) is not the release version. Label results "fixture check".
+The mock cannot exercise the native folder picker or real file writes, its
+`plugin:app|version` answer (0.1.0) is not the release version, and relaunch
+is a silent no-op. Label results "fixture check".
 
 `dev/mock-bridge.js` is an older, minimal mock with three scenarios. When a
 wire type changes, update both mocks in the same change.
@@ -234,7 +236,7 @@ src/                             # SolidJS renderer
   browseData.ts stackArgs.ts json.ts parse.ts
   views/
     Onboard.tsx StackSetup.tsx TopBar.tsx TitleBar.tsx
-    Browse.tsx Project.tsx Presets.tsx StackPath.tsx Updates.tsx
+    Browse.tsx Project.tsx Presets.tsx Updates.tsx
   *.test.ts                      # vitest, node environment
 src-tauri/
   Cargo.toml build.rs tauri.conf.json Cargo.lock

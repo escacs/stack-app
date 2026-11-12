@@ -1,6 +1,6 @@
 // Project page: everything about the open project — the set-up slot, this
 // project's imports (update, remove, sync, adopt), then presets. App-wide
-// settings (stack checkout, app version) live in the footer, not here. One
+// state (app version, updater) lives in the footer line, not here. One
 // op runs at a time; the lock is re-read after every op, failed or not, so
 // the rows never lag what the CLI last did. Update merges or leaves
 // <<<<<<< markers, remove keeps edited files, sync only restores missing

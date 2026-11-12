@@ -119,7 +119,7 @@ When the stack cannot be used, the views are replaced by this screen:
 ```
 no escacs/stack checkout found: looked upward from the app, its install
 folder and the working folder for tools/stack/cli.mjs. Pick your stack clone
-in settings (the folder containing tools/stack/cli.mjs).
+(the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it.
 
 pick stack folder   re-check
 ```
@@ -127,7 +127,7 @@ pick stack folder   re-check
 The app looks for the checkout in this order:
 
 1. The folder saved in settings (`stackPath`). Set by `pick stack folder`
-   here, or `change` in the footer settings.
+   here.
 2. The `ESCACS_STACK` environment variable.
 3. A search upward from the app's executable, from the folder it was built
    in, and from the working folder, for `tools/stack/cli.mjs`. A normal
@@ -138,8 +138,10 @@ The app looks for the checkout in this order:
 
 A picked folder is checked before it is saved. An invalid pick is refused
 with the reason shown on this screen and is not remembered, so the app never
-blocks on a bad folder at the next launch. This screen has no `auto` button;
-`auto` in the footer settings only appears once the app is usable.
+blocks on a bad folder at the next launch. When a folder is saved, `auto`
+appears next to `re-check` and forgets it, back to the automatic lookup.
+This screen is the only place that names the stack folder; everywhere else
+it hides behind the version's tooltip in the footer.
 
 ### Top bar and footer
 
@@ -153,13 +155,16 @@ project / browse                        mel  …/projects/folio
 - `(x_x)` appears when node is not usable. Hover it for the message.
 - The user and project buttons go back to who and project (see above).
 
-Footer, bottom of the window: the app version, then `→ <version> available`
-when the startup check found a newer release, then `N update` or
-`N updates` when project imports have changes waiting, then `settings`.
-The update links open the project page. `settings` expands the app-wide
-lines: the stack checkout in use (`change`/`auto`) and the app version with
-its update controls. They live here because they are about the app, not the
-project.
+Footer, bottom of the window, one quiet line: the app version, then
+`check for updates`, then `N update` or `N updates` when project imports
+have changes waiting. The update count opens the project page; the version's
+tooltip names the stack checkout in use and where it came from
+(settings, env or auto). The updater stays on that same line: `checking…`,
+`up to date` (fades back to the link), `→ <version> available [install]`,
+download progress, `[relaunch]`. A newer release found by the startup check
+shows the same `→ <version> available [install]` without clicking. Errors
+show short and dim with the full text in a tooltip, plus `[retry]`. All of
+it lives here because it is about the app, not the project.
 
 Any other route shows `(o_O) not found`.
 
@@ -354,7 +359,7 @@ web   React starter: button plus the file-pr skill. . . .  all here   preview ap
 docs  Docs setup: conventions plus the agents-md scaffold. . .  2 new   preview apply
 ```
 
-The stack checkout and app version lines moved to the footer `settings`
+The app version and updater live in the footer line, not on this page
 (see [top bar and footer](#top-bar-and-footer)).
 
 Rows with upstream changes look like this:
@@ -437,23 +442,18 @@ A long list stays short on the page:
   mostly a starting point; in a project with nothing imported it starts open.
   Your choice sticks until you switch project.
 
-### Footer settings
+### App updates
 
-The stack checkout and app update lines live under the footer's `settings`,
-not on this page.
-
-The checkout line shows the checkout in use. `change` picks another folder
-and saves it as the override. `auto` appears only when an override is
-saved, and removes it.
-
-App updates:
+The updater lives in the footer line, not on this page (see
+[top bar and footer](#top-bar-and-footer)).
 
 - At startup the app checks the release feed once, in the background. A
-  newer version shows in the footer as `→ <version> available`. A failed
-  startup check is written to the terminal only.
-- `check` runs a check now. It shows `up to date`, or the error text.
-- `install` appears when a newer version is known. It downloads with
-  progress, checks the signature, and installs. Then `relaunch` appears.
+  newer version shows in the footer as `→ <version> available [install]`.
+  A failed startup check is written to the terminal only.
+- `check for updates` runs a check now. It shows `up to date`, then fades
+  back to the link — or the short error with `[retry]`.
+- `[install]` appears when a newer version is known. It downloads with
+  progress, checks the signature, and installs. Then `[relaunch]` appears.
 - Self-update on Linux works for the AppImage. Development builds can check
   but cannot install over themselves. See [docs/UPDATES.md](UPDATES.md).
 
@@ -479,7 +479,8 @@ To reset:
 
 - Everything: quit the app and delete `config.json`. The next launch starts
   at who, with automatic stack lookup.
-- Only the stack folder: `auto` in the footer settings, or set `stackPath` to `null`.
+- Only the stack folder: `auto` on the setup screen (when the app is
+  blocked and a folder is saved), or set `stackPath` to `null`.
 - `scripts/uninstall-stack-app.sh --config` also forgets the stack path and
   recent projects. See [docs/INSTALL.md](INSTALL.md#appimage).
 
@@ -532,7 +533,7 @@ CLI's stderr, or its stdout if stderr is empty.
 | `… it is not a git checkout with a HEAD commit` | the folder has no `.git` with a `HEAD` | clone the stack, or pick the clone |
 | component libraries missing from browse | the CLI could not sync a remote library and has no cache. It prints a `warning:` line to stderr, and the app drops stderr on success. Not verified in the app: this row comes from reading the CLI source | in the stack checkout: `node tools/stack/cli.mjs remote sync <library>` |
 | offline | network down | `show` and `status` do not need the network. `list` syncs remote libraries first and falls back to their cache when the sync fails |
-| `check` shows an error | no network, or the release feed is not reachable (the repo must be public) | read the message; retry later. Startup failures show only in the terminal |
+| footer check shows an error | no network, or the release feed is not reachable (the repo must be public) | hover for the full message; `[retry]` later. Startup failures show only in the terminal |
 | `nothing listed`, `(._.) none` | the stack has no entries of that kind, or the list is empty | check the checkout: `node tools/stack/cli.mjs list` in the stack folder |
 | `untracked look-alikes, nothing written:` | target files exist with different content | move them, pick another `--to`, or delete them. Identical files are fine |
 | `not committed in the stack: can't import` | the entry is only in the stack's working tree | commit it in the stack checkout, then retry |
@@ -543,8 +544,9 @@ CLI's stderr, or its stdout if stderr is empty.
 
 For UI work in a browser, the app can run on a mock of its native bridge.
 Each mock scenario is a fixture stack, project and user. Fixture data is
-invented. The mock cannot show the folder picker, the update feed, or
-persistent settings. Details and build steps are in the README:
+invented. The mock cannot show the folder picker or persistent settings;
+the update feed is emulated (see the `+update-*` flags below). Details and
+build steps are in the README:
 [UI verification without the native shell](../README.md#ui-verification-without-the-native-shell).
 
 Open the built app with the scenario in the hash: `#<scenario>,/<route>`.
@@ -568,3 +570,9 @@ opens the project page, as an alias.
 | `lots` | three imports and 34 presets |
 | `bad-stack` | the stack checkout setup screen |
 | `no-node` | the setup screen with node missing |
+
+A `+update-available` or `+update-error` suffix on any scenario drives the
+footer updater fixture: `#populated+update-available,/project` offers the
+invented 0.1.9 (the startup event fires, and checks answer it; `[install]`
+streams progress), while `+update-error` fails checks. Without a suffix,
+checks answer up to date.

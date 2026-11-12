@@ -78,7 +78,7 @@ found on `PATH`.
      work.
    - Rust inits the updater + process plugins, capabilities allow
      `updater:default` + `process:allow-restart`, startup does one
-     silent non-blocking check, and the settings view offers
+     silent non-blocking check, and the footer offers
      check/download+install/relaunch. No update URL is hardcoded in the
      frontend — everything flows through the Tauri config.
    - `release.yml` has `contents: write`, builds linux-only on the old
@@ -97,7 +97,7 @@ found on `PATH`.
   signed bundles and `latest.json`, and the 404 that blocked checks is
   gone (repo is public), but no older install has checked, downloaded and
   relaunched yet. Needs: install the 0.1.1 AppImage, tag `v0.1.2`, then
-  check-for-updates from settings and confirm the relaunch.
+  check-for-updates from the footer and confirm the relaunch.
 - The window is frameless (`decorations: false`) with a custom titlebar.
   Edge-resize on a frameless X11 window is compositor-dependent and was
   never verified headless — confirm drag/resize on target setups.
