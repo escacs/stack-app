@@ -128,6 +128,7 @@
       return structuredClone(fx.config);
     },
     validate_project: async ({ path }) => fx.report(path),
+    project_folders: async () => ({ folders: [] }),
     node_status: async () => ({ ...fx.node }),
     // Release version the footer shows (mirrors tauri.conf in the real app).
     "plugin:app|version": async () => "0.1.0",

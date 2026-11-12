@@ -7,23 +7,36 @@ import {
   describeImport,
   describeInit,
   describePresetApply,
+  describePresetPreview,
   describeRemove,
   describeSync,
   describeUpdate,
   docNameFor,
+  defaultImportDest,
   entryMarkers,
   fromStackOut,
   importArgs,
+  importDestHint,
+  matchPresets,
+  needsImportDest,
   parseJsonOut,
   presetApplyArgs,
+  presetCountText,
+  presetCountTitle,
   presetImportsHint,
   presetListArgs,
+  presetsFilterable,
+  presetsStartOpen,
   presetShowArgs,
+  previewFresh,
+  quickImportError,
+  quickImportLine,
   refusalFiles,
   searchArgs,
   showFileArgs,
   toShowDoc,
   toShowFile,
+  visiblePresets,
   toStatusRows,
   type ImportJson,
   type InitJson,
@@ -228,6 +241,70 @@ describe('searchArgs / importArgs', () => {
   it('adds --to only when set', () => {
     expect(importArgs('skills/a', '')).toEqual(['skills/a', '--json']);
     expect(importArgs('skills/a', '  vendor ')).toEqual(['skills/a', '--to', 'vendor', '--json']);
+  });
+});
+
+describe('quick import destinations', () => {
+  it('mirrors the CLI fallback: skills, payloads, then .stack/', () => {
+    expect(defaultImportDest({ id: 'skills/file-pr', kind: 'skill', name: 'file-pr' })).toBe('.agents/skills/file-pr');
+    expect(defaultImportDest({ id: 'styles/x', kind: 'style', name: 'x' })).toBe('.agents/skills/x');
+    expect(defaultImportDest({ id: 'templates/agents-md', kind: 'template', name: 'agents-md', payload: 'files' })).toBe(
+      '.',
+    );
+    expect(defaultImportDest({ id: 'components/react/button', kind: 'component', name: 'button' })).toBe(
+      '.stack/components/react/button',
+    );
+    expect(defaultImportDest({ id: 'workers/mel', kind: 'worker', name: 'mel' })).toBe('.stack/workers/mel');
+  });
+
+  it('asks for a destination only for copy entries without a payload', () => {
+    expect(needsImportDest({ usage: 'copy' })).toBe(true);
+    expect(needsImportDest({ usage: 'link' })).toBe(false);
+    expect(needsImportDest({ usage: 'reference' })).toBe(false);
+    expect(needsImportDest({ usage: 'package' })).toBe(false);
+    expect(needsImportDest({ usage: 'copy', payload: 'files' })).toBe(false);
+  });
+
+  it('prefills components with src/components/<name>, nothing otherwise', () => {
+    expect(importDestHint({ kind: 'component', name: 'button' })).toBe('src/components/button');
+    expect(importDestHint({ kind: 'asset', name: 'escacs-mark' })).toBeNull();
+  });
+});
+
+describe('quickImportLine / quickImportError', () => {
+  const res = (imported: ImportJson['imported'], already: string[] = []): ImportJson => ({
+    command: 'import',
+    commit: 'c',
+    imported,
+    already,
+    gitignore: 'unchanged',
+  });
+
+  it('reads imported → path, with +N dep for required entries', () => {
+    expect(quickImportLine(res([{ id: 'skills/a', path: '.agents/skills/a' }]), 'skills/a')).toBe(
+      'imported → .agents/skills/a',
+    );
+    expect(
+      quickImportLine(
+        res([
+          { id: 'components/react/button', path: 'src/components/ui' },
+          { id: 'components/react/icon-button', path: '.stack/components/react/icon-button', requiredBy: 'components/react/button' },
+        ]),
+        'components/react/button',
+      ),
+    ).toBe('imported → src/components/ui +1 dep');
+  });
+
+  it('names already-here rows instead of a path', () => {
+    expect(quickImportLine(res([], ['skills/a']), 'skills/a')).toBe('already here');
+  });
+
+  it('keeps the first stderr line, capped, for failures', () => {
+    expect(quickImportError('these files already exist with other content; move them or choose --to:\n  a\n  b')).toBe(
+      'these files already exist with other content; move them or choose --to:',
+    );
+    expect(quickImportError('')).toBe('import failed');
+    expect(quickImportError(`${'x'.repeat(200)}\nsecond`)).toBe(`${'x'.repeat(99)}…`);
   });
 });
 
@@ -489,6 +566,140 @@ describe('describePresetApply', () => {
   });
 });
 
+describe('describePresetPreview', () => {
+  // Shape verified against the real CLI: `preset apply react-app --dry-run
+  // --json` returns PresetApplyJson plus dryRun:true, with `imported` naming
+  // what would land where and `already` naming what is already imported.
+  const dryRun: PresetApplyJson = {
+    command: 'preset',
+    action: 'apply',
+    preset: 'react-app',
+    dryRun: true,
+    commit: 'c',
+    imported: [
+      { id: 'templates/react-vite-tooling', path: '.' },
+      { id: 'components/base/button', path: 'src/components/button', requiredBy: 'x' },
+    ],
+    already: ['libraries/tailwindcss'],
+    conflicts: [],
+    gitignore: 'unchanged',
+  };
+
+  it('gives one line per entry: what lands where, deps tagged, what is here', () => {
+    expect(describePresetPreview(dryRun)).toEqual([
+      { kind: 'new', id: 'templates/react-vite-tooling', path: '.' },
+      {
+        kind: 'dep',
+        id: 'components/base/button',
+        path: 'src/components/button',
+        tag: 'dep',
+        title: 'required by x',
+      },
+      { kind: 'here', id: 'libraries/tailwindcss', tag: '✓ here', title: 'already imported' },
+    ]);
+  });
+
+  it('keeps the full reason out of the line: only the tooltip names the requirer', () => {
+    const dep = describePresetPreview(dryRun).find((l) => l.kind === 'dep');
+    expect(dep?.tag).toBe('dep');
+    expect(dep?.id).not.toContain('required by');
+    expect(dep?.title).toBe('required by x');
+  });
+
+  it('leads with collisions and never claims a write', () => {
+    const lines = describePresetPreview({ ...dryRun, conflicts: ['src/x.md', 'src/y.md'] });
+    expect(lines.slice(0, 2).map((l) => [l.kind, l.id, l.tag])).toEqual([
+      ['conflict', 'src/x.md', 'exists'],
+      ['conflict', 'src/y.md', 'exists'],
+    ]);
+    expect(lines[0].title).toContain('would collide');
+    for (const l of lines) {
+      expect(l.id).not.toMatch(/^imported /);
+      expect(`${l.tag ?? ''}${l.title ?? ''}`).not.toMatch(/\bwrote\b/);
+    }
+  });
+
+  it('marks every dependency, however many a preview pulled in', () => {
+    const lines = describePresetPreview({
+      ...dryRun,
+      imported: [
+        { id: 'a', path: 'a' },
+        { id: 'b', path: 'b', requiredBy: 'a' },
+        { id: 'c', path: 'c', requiredBy: 'a' },
+      ],
+    });
+    expect(lines.filter((l) => l.kind === 'dep').map((l) => l.id)).toEqual(['b', 'c']);
+    expect(lines.filter((l) => l.kind === 'new').map((l) => l.id)).toEqual(['a']);
+  });
+
+  it('reports the quiet case and the gitignore touch', () => {
+    expect(describePresetPreview({ ...dryRun, imported: [], already: [] })).toEqual([
+      { kind: 'note', id: 'nothing new: everything already here' },
+    ]);
+    expect(describePresetPreview({ ...dryRun, gitignore: 'updated' }).at(-1)).toEqual({
+      kind: 'note',
+      id: '.gitignore',
+      path: 'managed escacs block updates',
+    });
+  });
+});
+
+describe('previewFresh', () => {
+  it('keeps a preview when no op started since its request', () => {
+    expect(previewFresh(3, 3)).toBe(true);
+  });
+
+  it('drops a preview that resolves after any op started', () => {
+    // The op may still be running or long finished: either way the lock
+    // state the dry run named is gone.
+    expect(previewFresh(3, 4)).toBe(false);
+    expect(previewFresh(3, 5)).toBe(false);
+  });
+});
+
+describe('presetCountText', () => {
+  const imports = [
+    { id: 'components/react/button', to: 'src/components/ui' },
+    { id: 'skills/file-pr', to: null },
+  ];
+  const here = new Set(['skills/file-pr']);
+
+  it('counts what is new against the lock', () => {
+    expect(presetCountText(imports, here, 0)).toBe('1 new');
+    expect(presetCountText(imports, new Set(), 0)).toBe('2 new');
+  });
+
+  it('reads all here when nothing is new', () => {
+    expect(
+      presetCountText(imports, new Set(['components/react/button', 'skills/file-pr']), 0),
+    ).toBe('all here');
+  });
+
+  it('appends the preview-named dependencies so the row matches the preview', () => {
+    expect(presetCountText(imports, here, 1)).toBe('1 new · 1 dep');
+    expect(presetCountText(imports, here, 2)).toBe('1 new · 2 dep');
+  });
+});
+
+describe('presetCountTitle', () => {
+  const imports = [
+    { id: 'components/react/button', to: 'src/components/ui' },
+    { id: 'skills/file-pr', to: null },
+  ];
+  const here = new Set(['skills/file-pr']);
+
+  it('spells the counts out for the tooltip', () => {
+    expect(presetCountTitle(imports, here, 0)).toBe('2 imports, 1 new');
+    expect(presetCountTitle(imports.slice(0, 1), new Set(), 0)).toBe('1 import, 1 new');
+    expect(presetCountTitle(imports, new Set(['components/react/button', 'skills/file-pr']), 0)).toBe('2 imports, all here');
+  });
+
+  it('names dependencies once a preview has', () => {
+    expect(presetCountTitle(imports, here, 1)).toContain('1 dependency');
+    expect(presetCountTitle(imports, here, 2)).toContain('2 dependencies');
+  });
+});
+
 describe('refusalFiles', () => {
   it('collects the files after the refusal line', () => {
     const text = 'these files already exist with other content; move them or choose --to:\n  a.md\n  b/c.md\n';
@@ -498,5 +709,63 @@ describe('refusalFiles', () => {
   it('returns [] for other errors', () => {
     expect(refusalFiles('no entry "x"')).toEqual([]);
     expect(refusalFiles('')).toEqual([]);
+  });
+});
+
+describe('presets at scale', () => {
+  const mk = (name: string, description = '') => ({ name, description, imports: [] });
+  const list = [
+    mk('web', 'React starter'),
+    mk('docs', 'Docs setup: conventions'),
+    mk('api', 'Server starter'),
+    mk('cli', 'Command line tool'),
+    mk('desktop', 'Tauri app, React optional'),
+    mk('mobile', 'Mobile shell'),
+    mk('landing', 'Marketing page'),
+    mk('lib', 'Library repo'),
+  ];
+
+  it('starts open for a short list or an empty project, folded otherwise', () => {
+    expect(presetsStartOpen(3, 4)).toBe(true);
+    expect(presetsStartOpen(5, 4)).toBe(true);
+    expect(presetsStartOpen(12, 0)).toBe(true);
+    expect(presetsStartOpen(12, 1)).toBe(false);
+  });
+
+  it('offers a filter only past eight presets', () => {
+    expect(presetsFilterable(8)).toBe(false);
+    expect(presetsFilterable(9)).toBe(true);
+  });
+
+  it('filters name and description, case-insensitive, every term must match', () => {
+    expect(matchPresets(list, '').length).toBe(8);
+    expect(matchPresets(list, '  ').length).toBe(8);
+    expect(matchPresets(list, 'REACT').map((p) => p.name)).toEqual(['web', 'desktop']);
+    expect(matchPresets(list, 'react start').map((p) => p.name)).toEqual(['web']);
+    expect(matchPresets(list, 'zzz')).toEqual([]);
+  });
+
+  it('cuts to five rows with a hidden count, or shows all', () => {
+    const cut = visiblePresets(list, '', false, null);
+    expect(cut.rows.map((p) => p.name)).toEqual(['web', 'docs', 'api', 'cli', 'desktop']);
+    expect(cut.hidden).toBe(3);
+    const all = visiblePresets(list, '', true, null);
+    expect(all.rows.length).toBe(8);
+    expect(all.hidden).toBe(0);
+  });
+
+  it('counts the cut against the filter matches, not the whole list', () => {
+    const r = visiblePresets(list, 'e', false, null, 2);
+    expect(r.rows.length).toBe(2);
+    expect(r.hidden).toBe(matchPresets(list, 'e').length - 2);
+  });
+
+  it('keeps the previewed preset in place, past the cut and past the filter', () => {
+    const cut = visiblePresets(list, '', false, 'landing');
+    expect(cut.rows.map((p) => p.name)).toEqual(['web', 'docs', 'api', 'cli', 'desktop', 'landing']);
+    expect(cut.hidden).toBe(2);
+    const filtered = visiblePresets(list, 'docs', false, 'mobile');
+    expect(filtered.rows.map((p) => p.name)).toEqual(['docs', 'mobile']);
+    expect(filtered.hidden).toBe(0);
   });
 });

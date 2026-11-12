@@ -1,14 +1,23 @@
 import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
-import { actionError, addStackCommand, appUpdate, appVersion, boot, bootError, cliNote, config, configNotice, dismissCliNote, lock, projectDone, stack, whoDone, workerSkipped } from './store';
+import { actionError, addStackCommand, appVersion, boot, bootError, cliNote, config, configNotice, dismissCliNote, lock, projectDone, stack, whoDone, workerSkipped } from './store';
 import { countUpdates } from './parse';
-import { href, parseHash } from './router';
+import { href, parseHash, resolveView } from './router';
 import TitleBar from './views/TitleBar';
 import TopBar from './views/TopBar';
 import Browse from './views/Browse';
-import Status from './views/Status';
+import Project from './views/Project';
+import { Updates } from './views/Updates';
 import StackSetup from './views/StackSetup';
 import { onboardStep } from './onboard';
 import { ProjectScreen, WhoScreen } from './views/Onboard';
+
+// The stack checkout in use, discoverable from the version tooltip — the
+// footer shows the folder nowhere else. `source` is settings, env or auto.
+function stackTip(): string {
+  const s = stack();
+  if (!s?.path) return 'stack checkout not found';
+  return `stack ${s.path} (${s.source})`;
+}
 
 export default function App() {
   const [hash, setHash] = createSignal(parseHash(location.hash));
@@ -20,7 +29,7 @@ export default function App() {
   onCleanup(() => removeEventListener('hashchange', onHash));
 
   const segs = () => hash().segs;
-  const view = () => segs()[0] ?? '';
+  const view = () => resolveView(segs());
   const blocked = () => stack() != null && !stack()?.valid;
   // First run: one question per screen (who, then which project) instead
   // of the router. The shell chrome hides until both are answered.
@@ -71,11 +80,11 @@ export default function App() {
         </Show>
         <Show when={config() && !blocked() && !step()}>
           <Switch>
-            <Match when={view() === '' || view() === 'browse'}>
-              <Browse scenario={hash().scenario} segs={view() === '' ? ['browse'] : segs()} />
+            <Match when={view() === 'project'}>
+              <Project scenario={hash().scenario} />
             </Match>
-            <Match when={view() === 'installed'}>
-              <Status scenario={hash().scenario} />
+            <Match when={view() === 'browse'}>
+              <Browse scenario={hash().scenario} segs={segs()} />
             </Match>
             <Match when={true}>
               <p class="empty">(o_O) not found</p>
@@ -86,20 +95,20 @@ export default function App() {
       <Show when={!step()}>
         <footer class="appfoot">
           <span class="dimtxt">
-            <Show when={appVersion()}>{(v) => <span>{v()}</span>}</Show>
-            <Show when={appUpdate()}>
+            <Show when={appVersion()}>
               {(v) => (
                 <span>
+                  <span title={stackTip()}>{v()}</span>
                   {' · '}
-                  <a href={href(hash().scenario, 'installed')}>→ {v()} available</a>
                 </span>
               )}
             </Show>
+            <Updates />
             <Show when={updates() > 0}>
               <span>
                 {' · '}
-                <a href={href(hash().scenario, 'installed')}>
-                  {updates()} update{updates() === 1 ? '' : 's'}
+                <a href={href(hash().scenario, 'project')}>
+                  {updates()} import update{updates() === 1 ? '' : 's'}
                 </a>
               </span>
             </Show>

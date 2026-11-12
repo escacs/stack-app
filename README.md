@@ -188,18 +188,19 @@ need no capability entries; each plugin call needs its permission.
 ## Presets
 
 Presets are named import plans that the stack keeps in `presets/*.toml`. They
-live at the bottom of the installed view (`src/views/Presets.tsx`), one row
-per preset: name, description, and an `apply` button. Rows do not expand; the
-button's hover title lists what it imports. `apply` runs
-`preset apply <name> --json` through the installed view's op runner
-(`src/views/Status.tsx`), so its busy state and result share the rows' log.
-Apply refuses exactly like import: nothing is written when a target file
-differs.
+live at the bottom of the project page (`src/views/Presets.tsx`), one row
+per preset: name, description, import counts against the lock, and `preview`
+/ `apply` buttons. `preview` runs `preset apply <name> --dry-run --json`
+and expands what would land where and what is already imported, without
+writing anything. `apply` runs `preset apply <name> --json` through the
+project page's op runner (`src/views/Project.tsx`), so its busy state and
+result share the rows' log. Apply refuses exactly like import: nothing is
+written when a target file differs.
 
 Wire shapes (`--json`):
 
 - `preset list`: `{command:'preset', action:'list', count, presets:[{name, description, imports:[{id, to}]}]}`
-- `preset apply <name>`: `{command:'preset', action:'apply', preset, commit, imported:[{id, path, requiredBy?}], already, gitignore}`, plus `conflicts` on a `--dry-run` only. The app never sends `--dry-run`. The result renders through `describePresetApply` (`src/json.ts`).
+- `preset apply <name>`: `{command:'preset', action:'apply', preset, commit, imported:[{id, path, requiredBy?}], already, gitignore}`, plus `dryRun:true` and `conflicts` on a `--dry-run` only. A real apply renders through `describePresetApply`, a preview through `describePresetPreview` (`src/json.ts`).
 - `preset show <name>` is allowlisted but no current view calls it.
 
 ## Vendored web style (snapshot, not shared source)
@@ -227,16 +228,18 @@ python3 -I -m http.server 8137 --bind 127.0.0.1 --directory "$out"
 ```
 
 Open `http://127.0.0.1:8137/#<scenario>,/<route>`, for example
-`#conflicts,/installed`. `dev/mock-app-bridge.js` reads the scenario from the
+`#conflicts,/project`. `dev/mock-app-bridge.js` reads the scenario from the
 hash: `populated` (default), `empty`, `noworker`, `noproject`, `scan`,
 `conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`,
-`no-auth`, `no-cli`, `cli-foreign`, `no-path`. Reload
-the page to switch scenario; a hash-only change keeps the old fixture.
-`docs/USAGE.md` §8 lists what each one shows.
+`no-auth`, `no-cli`, `cli-foreign`, `no-path`. A
+`+update-available` or `+update-error` suffix on any scenario drives the
+footer updater fixture (invented 0.1.9, emulated startup event and
+download progress). Reload the page to switch scenario; a hash-only change
+keeps the old fixture. `docs/USAGE.md` §8 lists what each one shows.
 
-The mock cannot exercise the native folder picker, the update feed, the
-startup update event, or real file writes, and its `plugin:app|version` answer
-(0.1.0) is not the release version. Label results "fixture check".
+The mock cannot exercise the native folder picker or real file writes, its
+`plugin:app|version` answer (0.1.0) is not the release version, and relaunch
+is a silent no-op. Label results "fixture check".
 
 `dev/mock-bridge.js` is an older, minimal mock with three scenarios. When a
 wire type changes, update both mocks in the same change.
@@ -253,7 +256,7 @@ src/                             # SolidJS renderer
   browseData.ts stackArgs.ts json.ts parse.ts
   views/
     Onboard.tsx StackSetup.tsx TopBar.tsx TitleBar.tsx
-    Browse.tsx Status.tsx Presets.tsx StackPath.tsx Updates.tsx
+    Browse.tsx Project.tsx Presets.tsx Updates.tsx
   *.test.ts                      # vitest, node environment
 src-tauri/
   Cargo.toml build.rs tauri.conf.json Cargo.lock
@@ -305,12 +308,12 @@ Use a stack checkout with a committed entry such as `skills/file-pr`. Run
    the who screen, relaunch, and confirm the top bar shows it.
 2. Project: `browse folder` on the project screen, pick a folder with a `.git`
    dir, and confirm the top bar shows its path.
-3. Installed init: in a folder with no `stack.toml`, open `installed`, press
-   `init stack.toml`, and confirm `stack.toml` and the managed `.gitignore`
-   block exist.
+3. Project set-up: in a folder with no `stack.toml`, confirm the project
+   page opens with the set-up slot on top, press `init stack.toml`, and
+   confirm `stack.toml` and the managed `.gitignore` block exist.
 4. Browse import: search `file-pr`, open the entry, leave `--to` empty, press
    `import`, and confirm `.agents/skills/file-pr` is listed and gains a row
-   under `installed`. The project's `.gitignore` covers it.
+   on the project page. The project's `.gitignore` covers it.
 5. Edited row: change one line in the imported `SKILL.md`; the row reads
    `edited` with `SKILL.md` named.
 6. Update: commit a change to that entry in the stack, press `update`, and

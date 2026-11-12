@@ -30,6 +30,7 @@ import {
   type StatusJson,
 } from './json';
 import { toStatusRows } from './json';
+import { href, parseHash } from './router';
 import type { LockStatus } from './parse';
 
 export const [config, setConfig] = createSignal<AppConfig | null>(null);
@@ -45,7 +46,7 @@ export const [workers, setWorkers] = createSignal<JsonEntry[]>([]);
 export const [workersLoaded, setWorkersLoaded] = createSignal(false);
 export const [workersError, setWorkersError] = createSignal<string | null>(null);
 export const [lock, setLock] = createSignal<LockStatus>(emptyLock());
-// Why the last `status` read failed (null when it worked). The installed view
+// Why the last `status` read failed (null when it worked). The project page
 // shows it instead of a misleading "nothing imported".
 export const [lockError, setLockError] = createSignal<string | null>(null);
 export const [busy, setBusy] = createSignal<string | null>(null);
@@ -437,5 +438,7 @@ export async function chooseProject(path: string | null): Promise<void> {
   setLock(emptyLock());
   setProjectDone(true);
   setConfig({ ...cfg, worker: next.worker, project: path });
+  // Opening a project lands on the project page, whatever route was showing.
+  location.hash = href(parseHash(location.hash).scenario, 'project');
   await refreshLock();
 }

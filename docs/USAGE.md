@@ -1,7 +1,7 @@
 # Using stack
 
 Contents: [what it is](#1-what-it-is) · [before you start](#2-before-you-start) ·
-[first run](#3-first-run) · [browse](#4-browse) · [installed](#5-installed) ·
+[first run](#3-first-run) · [browse](#4-browse) · [project page](#5-project-page) ·
 [where things are stored](#6-where-things-are-stored) ·
 [troubleshooting](#7-troubleshooting) · [preview without the app](#8-preview-without-the-native-shell)
 
@@ -37,7 +37,7 @@ Update channel and release process: [docs/UPDATES.md](UPDATES.md).
 The app asks two questions before it shows the views:
 
 ```
-open → choose who → choose project → browse + installed
+open → choose who → choose project → project page + browse
 ```
 
 If no usable stack checkout is found, the setup screen comes first.
@@ -119,7 +119,7 @@ When the stack cannot be used, the views are replaced by this screen:
 ```
 no escacs/stack checkout found: looked upward from the app, its install
 folder and the working folder for tools/stack/cli.mjs. Pick your stack clone
-in settings (the folder containing tools/stack/cli.mjs).
+(the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it.
 
 pick stack folder   re-check
 ```
@@ -127,7 +127,7 @@ pick stack folder   re-check
 The app looks for the checkout in this order:
 
 1. The folder saved in settings (`stackPath`). Set by `pick stack folder`
-   here, or `change` in installed.
+   here.
 2. The `ESCACS_STACK` environment variable.
 3. A search upward from the app's executable, from the folder it was built
    in, and from the working folder, for `tools/stack/cli.mjs`. A normal
@@ -138,40 +138,50 @@ The app looks for the checkout in this order:
 
 A picked folder is checked before it is saved. An invalid pick is refused
 with the reason shown on this screen and is not remembered, so the app never
-blocks on a bad folder at the next launch. This screen has no `auto` button;
-`auto` in installed only appears once the app is usable.
+blocks on a bad folder at the next launch. When a folder is saved, `auto`
+appears next to `re-check` and forgets it, back to the automatic lookup.
+This screen is the only place that names the stack folder; everywhere else
+it hides behind the version's tooltip in the footer.
 
 ### Top bar and footer
 
 ```
-browse / installed                        mel  …/projects/folio
+project / browse                        mel  …/projects/folio
 ```
 
-- `browse` and `installed` switch views. The current one is marked.
+- `project` and `browse` switch views. The current one is marked. `project`
+  is the default: opening a project lands there.
 - While an operation runs, its name and `…` appear before the user name.
 - `(x_x)` appears when node is not usable. Hover it for the message.
 - The user and project buttons go back to who and project (see above).
 
-Footer, bottom of the window: the app version, then `→ <version> available`
-when the startup check found a newer release, then `N update` or
-`N updates` when installed imports have changes waiting. The last two link
-to installed.
+Footer, bottom of the window, one quiet line: the app version, then
+`check for updates`, then `N import update` or `N import updates` when
+project imports have changes waiting. The update count opens the project page; the version's
+tooltip names the stack checkout in use and where it came from
+(settings, env or auto). The updater stays on that same line: `checking…`,
+`up to date` (fades back to the link), `→ <version> available [install]`,
+download progress, `[relaunch]`. A newer release found by the startup check
+shows the same `→ <version> available [install]` without clicking. Errors
+show short and dim with the full text in a tooltip, plus `[retry]`. All of
+it lives here because it is about the app, not the project.
 
 Any other route shows `(o_O) not found`.
 
 ## 4. Browse
 
-Browse is the stack's catalog. The prompt line shows where you are, and the
-search box follows it.
+Browse is the stack's catalog, on its own screen. The prompt line shows
+where you are — the trail starts at the catalog name — and the search box
+follows it.
 
 ```
-~/skills/file-pr  ›  type to search
+stack/skills/file-pr  ›  type to search
 ```
 
 ### Home
 
 ```
-~ ›
+stack ›
 
 ★ skills        ████████████████████   3
 ● styles        ███████·············   1
@@ -197,7 +207,7 @@ entry's origin in the stack, not what your project imported.
 ### Kind views
 
 ```
-~/skills ›
+stack/skills ›
 
 ★ file-pr      (^_^)  2f 219b
 ★ ponytail     (o_O)  2f 219b
@@ -208,6 +218,14 @@ Each row shows the name, the status face, and the file count and size. A
 [import](#import)). Components are grouped by library, as
 `components/react`, with a member count and `default` if it is the default
 library.
+
+Every entry row carries a quiet `[import]` button at its right end. It
+is always shown, dim while idle, and brightens while the row is hovered,
+focused or under the cursor. One click imports with the default
+destination, without leaving the list. Rows this project already imported
+show `(imported)` instead; rows that cannot be imported (`not-committed`)
+show nothing. A dim `↑↓ move · i import` line under each list names the
+list keys.
 
 ### all
 
@@ -221,7 +239,7 @@ Words are matched separately. An entry needs at least one match, and more
 matches rank it higher. A name match counts most.
 
 ```
-~ › pr
+stack › pr
 
 ★ skills/file-pr       (^_^)  2f 219b
 ▲ templates/agents-md  (^_^)  4f 451b      ← "project" in the summary
@@ -314,12 +332,45 @@ import
   here show under `already here`. A `.gitignore` line shows when the managed
   block changed.
 
+The same import runs straight from any entry row in a list: kind views,
+search results, `all`, and component library groups. While it runs the
+row reads `working`; on success the row flips to `(imported)` and a
+one-line result appears under it for a few seconds:
+
+```
+★ ponytail     (o_O)  2f 219b                   (imported)
+   imported → .agents/skills/ponytail
+```
+
+A click on that line expands the full import log. Pulled-in dependencies
+are mentioned briefly (`+1 dep`). On failure the short error shows
+instead, with a `[details]` button for the full error or the look-alike
+list. When a skill or style is refused for look-alikes, the same inline
+`to:` field opens under the error, prefilled with the default destination,
+so another destination can be chosen right there. Only one import runs at
+a time.
+
+Entries that belong in the source tree — components and other `copy`
+entries — are never imported blindly: their row button opens a small
+inline field on the row itself, prefilled with the convention
+(`src/components/button` for components) when there is one:
+
+```
+◆ button       (o_O)  2f 219b                     [import]
+   to: [src/components/ui  ]  [import]  esc
+```
+
+`Enter` imports there, `Escape` (or `esc`) closes the field. The entry
+page's import section keeps working as before, including an empty `--to`
+for the CLI default.
+
 ### Keys in Browse
 
 | key | does |
 |---|---|
 | `↑` `↓` | move the cursor over rows: home rows, list rows, file tree |
 | `Enter` | open the cursor row. With a search and no cursor, open the first result |
+| `i` | import the cursor row in place (lists only; never inside a text field) |
 | `Escape` | clear the search. Otherwise go up one level: file → entry → kind → home |
 | `Space` | scroll down about 80% of a page, when the search box is empty |
 | letter or digit | focus the search box and type into it |
@@ -327,27 +378,32 @@ import
 Clicking a row or link does the same as moving to it and pressing `Enter`.
 `j` and `k` are not bound in browse.
 
-## 5. Installed
+## 5. Project page
 
-Shows what this project imported from the stack. It needs a project.
+Everything about the open project: the set-up slot, what this project
+imported from the stack, and presets. It needs a project. The old
+`installed` route still opens this page, as an alias.
 
 ```
-imported  skills/file-pr        @b51359b → .agents/skills/file-pr        remove
-imported  styles/folio-light    @b51359b → .agents/skills/folio-light    remove
-imported  workers/mel           @b51359b → .stack/workers/mel            remove
+[init stack.toml]                         ← only without stack.toml
 
-sync @b51359b
+found in project: 1 look-alike entry     ← only when folders look like entries
+.agents/skills/ponytail → skills/ponytail (identical)  adopt
+adopt other…
 
-adopt…
+          skills/file-pr        @b51359b → .agents/skills/file-pr        remove
+          styles/folio-light    @b51359b → .agents/skills/folio-light    remove
+          workers/mel           @b51359b → .stack/workers/mel            remove
 
-presets
-web   React starter: button plus the file-pr skill.       apply
-docs  Docs setup: conventions plus the agents-md scaffold. apply
+sync stack @b51359b
 
-stack /home/dev/escacs/stack   change   auto
-app 0.1.0   check
-0.1.0
+presets 2
+web   React starter: button plus the file-pr skill. . . .  all here   preview apply
+docs  Docs setup: conventions plus the agents-md scaffold. . .  2 new   preview apply
 ```
+
+The app version and updater live in the footer line, not on this page
+(see [top bar and footer](#top-bar-and-footer)).
 
 Rows with upstream changes look like this:
 
@@ -359,7 +415,7 @@ update    skills/file-pr        @a1b2c3d → .agents/skills/file-pr        updat
 update    templates/agents-md   @a1b2c3d → .                             update  remove
           1 file changed upstream
 
-update all   sync @b51359b
+update all   sync stack @b51359b
 ```
 
 The `@…` value is the stack commit the import was made from.
@@ -368,13 +424,14 @@ The `@…` value is the stack commit the import was made from.
 
 | state | when | sub-line |
 |---|---|---|
-| `imported` | the files match the import and the stack has no newer content for them | none |
+| `imported` (no marker) | the files match the import and the stack has no newer content for them | none |
 | `edited` | at least one file differs from the import, or is missing | `edited: <files>` |
 | `update` | the stack's HEAD has different content for at least one file | `N files changed upstream` |
 | `gone` | the entry no longer exists at the stack's HEAD | `removed from stack` |
 
-The chip shows the first matching state in this order: `gone`, `update`,
-`edited`, `imported`. A row can be `update` and still list `edited:` files.
+Clean rows leave the marker slot blank; only rows needing attention print
+one, the first matching state in this order: `gone`, `update`, `edited`.
+A row can be `update` and still list `edited:` files.
 A deleted file counts as edited; `sync` restores it.
 
 ### Actions
@@ -385,15 +442,21 @@ A deleted file counts as edited; `sync` restores it.
 | `update all` | any row is `update` | the same for every row | |
 | `remove` | every row | deletes the import's unedited files and its entry in `stack.toml` | does not delete edited files; they are listed as `kept (edited here)` |
 | `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
-| `init stack.toml` | no rows, and no `stack.toml` in the project | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
-| `adopt…` | always | a form for an entry id, such as `skills/file-pr`, and an optional `--to`. It runs the same import as Browse | differing files are listed and nothing is written |
+| `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
+| `adopt` (one button per found folder) | a project folder looks like an entry that was never imported | records the folder's files in `stack.toml`: the same import as Browse, with the destination implied | differing files are listed and nothing is written |
+| `adopt other…` | always | the manual fallback: an entry id (autocompleted from the catalog) plus an optional folder in this project | differing files are listed and nothing is written |
+| preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
 | preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
-| `change` | always | picks another stack checkout and saves it | |
-| `auto` | a folder is saved | clears the saved folder: back to automatic lookup | |
 
-Use `adopt…` for a folder that holds an entry's files but was never
-imported. Identical files join the record. If any file differs, the app
-lists it and writes nothing.
+Next to the set-up slot, `found in project: N look-alike entries` lists
+folders that look like stack entries but were never imported: a skills
+folder, a `.stack/<id>` folder, or a hand-placed component. Each line names
+the folder and the entry it matches, with `(identical)` when its files
+already match the entry or `(differs)` when any file differs, and one
+`adopt` button that records it. `adopt other…` covers the rare folder the
+list misses: an entry id plus an optional folder in this project. A refused
+adopt names the differing files and the next step: move or delete them,
+then adopt again.
 
 Each action shows its result under the rows, as titled sections. A failed
 action shows the CLI's error text as it is. Only one action runs at a time;
@@ -403,24 +466,45 @@ it ends.
 ### Presets
 
 Presets are named import plans. The stack defines them in its
-`presets/*.toml` files. Each row here is one preset. Its `apply` imports all
-of the preset's rows, the same way `import` does. Hover `apply` to see what
-it imports. Rows do not expand.
+`presets/*.toml` files. The heading carries the count (`presets 12`). Each
+row is one preset on one line: its name, description (cut to fit; hover for
+the full text), compact counts against the lock (`M new`, or `all here`;
+`· N dep` once a preview has named auto-imported dependencies; hover for the
+long form), and two buttons. `preview` runs a `--dry-run` apply and unfolds a
+tree right under the row: one `id → path` line per entry, dependencies tagged
+`(dep)` (hover for what requires them), entries already imported dimmed with
+`(✓ here)`, colliding files marked `!` with `(exists)`. `hide` folds it
+again. Nothing is written. `apply` imports all of the preset's rows, the same
+way `import` does. Hover `apply` to see what it imports.
 
-### Stack checkout
+A long list stays short on the page:
 
-The line under the rows shows the checkout in use. `change` picks another
-folder and saves it as the override. `auto` appears only when an override is
-saved, and removes it.
+- **Five rows, then `[+N more]`.** More than five presets show the first five.
+  `[+N more]` reveals the rest, `[− fewer]` goes back.
+- **Filter.** With more than eight presets a `filter…` field sits in the
+  heading line. Type to narrow by name or description; every word you type
+  must match (any case). The heading shows `3/12` while filtering. `Esc`
+  clears the text, a second `Esc` leaves the field.
+- **Open preview stays.** A preview stays attached to its row, and that row
+  stays visible whatever the filter or the cut says.
+- **Collapse.** The heading is a toggle (`· collapse` / `· expand`) when
+  there are more than five presets. On a project that already has imports, a
+  list longer than five starts collapsed to its heading, since presets are
+  mostly a starting point; in a project with nothing imported it starts open.
+  Your choice sticks until you switch project.
 
 ### App updates
 
+The updater lives in the footer line, not on this page (see
+[top bar and footer](#top-bar-and-footer)).
+
 - At startup the app checks the release feed once, in the background. A
-  newer version shows in the footer as `→ <version> available`. A failed
-  startup check is written to the terminal only.
-- `check` runs a check now. It shows `up to date`, or the error text.
-- `install` appears when a newer version is known. It downloads with
-  progress, checks the signature, and installs. Then `relaunch` appears.
+  newer version shows in the footer as `→ <version> available [install]`.
+  A failed startup check is written to the terminal only.
+- `check for updates` runs a check now. It shows `up to date`, then fades
+  back to the link — or the short error with `[retry]`.
+- `[install]` appears when a newer version is known. It downloads with
+  progress, checks the signature, and installs. Then `[relaunch]` appears.
 - Self-update on Linux works for the AppImage. Development builds can check
   but cannot install over themselves. See [docs/UPDATES.md](UPDATES.md).
 
@@ -446,7 +530,8 @@ To reset:
 
 - Everything: quit the app and delete `config.json`. The next launch starts
   at who, with automatic stack lookup.
-- Only the stack folder: `auto` in installed, or set `stackPath` to `null`.
+- Only the stack folder: `auto` on the setup screen (when the app is
+  blocked and a folder is saved), or set `stackPath` to `null`.
 - `scripts/uninstall-stack-app.sh --config` also forgets the stack path and
   recent projects. See [docs/INSTALL.md](INSTALL.md#appimage).
 
@@ -475,15 +560,17 @@ Every view decodes the CLI's `--json` output:
 | who | `list worker` |
 | browse: list | `list` (online, so new remote members appear) |
 | browse: entry | `show <id>`, and `show <id> --file <path>` for file bodies |
-| installed rows | `status` |
-| presets | `preset list`; `preset apply <name>` |
-| import, adopt | `import` |
+| project rows | `status` |
+| presets | `preset list`; `preset apply <name>`; preview runs `preset apply <name> --dry-run` |
+| import, adopt, `adopt other…` | `import`; each adopt hint is one `import --dry-run` |
 | update, update all | `update` |
 | remove, sync, init | `remove`, `sync`, `init` |
 
 The app adds `--offline` to `show` and `status`, which never need the
-network. `list` stays online. A failed command shows its error text: the
-CLI's stderr, or its stdout if stderr is empty.
+network. `list` stays online. Adopt suggestions match a shell-side folder
+listing (the skills dirs, `src/components`, `.stack`) against the catalog
+by name. A failed command shows its error text: the CLI's stderr, or its
+stdout if stderr is empty.
 
 ## 7. Troubleshooting
 
@@ -499,39 +586,54 @@ CLI's stderr, or its stdout if stderr is empty.
 | `… it is not a git checkout with a HEAD commit` | the folder has no `.git` with a `HEAD` | clone the stack, or pick the clone |
 | component libraries missing from browse | the CLI could not sync a remote library and has no cache. It prints a `warning:` line to stderr, and the app drops stderr on success. Not verified in the app: this row comes from reading the CLI source | in the stack checkout: `node tools/stack/cli.mjs remote sync <library>` |
 | offline | network down | `show` and `status` do not need the network. `list` syncs remote libraries first and falls back to their cache when the sync fails |
-| `check` shows an error | no network, or the release feed is not reachable (the repo must be public) | read the message; retry later. Startup failures show only in the terminal |
+| footer check shows an error | no network, or the release feed is not reachable (the repo must be public) | hover for the full message; `[retry]` later. Startup failures show only in the terminal |
 | `nothing listed`, `(._.) none` | the stack has no entries of that kind, or the list is empty | check the checkout: `node tools/stack/cli.mjs list` in the stack folder |
 | `untracked look-alikes, nothing written:` | target files exist with different content | move them, pick another `--to`, or delete them. Identical files are fine |
 | `not committed in the stack: can't import` | the entry is only in the stack's working tree | commit it in the stack checkout, then retry |
 | `cannot resolve path` or `path is not a directory` | the project path is gone or is a file | pick the folder again |
-| `(o_O) not found` | a route the app does not have | use `browse` or `installed` in the top bar |
+| `(o_O) not found` | a route the app does not have | use `project` or `browse` in the top bar |
 
 ## 8. Preview without the native shell
 
 For UI work in a browser, the app can run on a mock of its native bridge.
 Each mock scenario is a fixture stack, project and user. Fixture data is
-invented. The mock cannot show the folder picker, the update feed, or
-persistent settings. Details and build steps are in the README:
+invented. The mock cannot show the folder picker or persistent settings;
+the update feed is emulated (see the `+update-*` flags below). Details and
+build steps are in the README:
 [UI verification without the native shell](../README.md#ui-verification-without-the-native-shell).
 
 Open the built app with the scenario in the hash: `#<scenario>,/<route>`.
-Routes are `browse`, `browse/<kind>`, `browse/all`, `browse/<id>`,
-`browse/<id>/<file>` and `installed`.
+Routes are `project`, `browse`, `browse/<kind>`, `browse/all`,
+`browse/<id>` and `browse/<id>/<file>`. The old `installed` route still
+opens the project page, as an alias.
 
 | scenario | what it shows |
 |---|---|
 | `populated` (default) | a project with three imports; one entry not committed; one with uncommitted stack changes |
 | `empty` | who, with two workers |
-| `noworker` | who, with no workers: `continue without one` leads to browse |
+| `noworker` | who, with no workers: `continue without one` leads to the project screen, then the project page |
 | `noproject` | project, with recent projects |
 | `scan` | project, with a scan root set. Press `scan` to list |
-| `conflicts` | installed with `update` rows and a conflict |
-| `missing` | installed with rows whose files are missing (shown as `edited`) |
+| `conflicts` | project page with `update` rows and a conflict |
+| `missing` | project page with rows whose files are missing (shown as `edited`) |
 | `lookalike` | an import refused for `skills/file-pr` |
-| `fresh` | installed in a plain folder: `init stack.toml` |
+| `fresh` | project page in a plain folder: the set-up slot with `init stack.toml` |
+| `many` | project page with three imports and 15 presets: the presets start collapsed |
+| `manyfresh` | plain folder with 15 presets: the set-up slot, presets open |
+| `lots` | three imports and 34 presets |
+| `adopt0` | project page with no adoptable folders: only the quiet `adopt other…` link |
+| `adopt1` | one adoptable folder next to `init stack.toml` |
+| `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
+| `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |
 | `bad-stack` | the stack checkout setup screen; get stack clones and the gate lifts |
 | `no-node` | the setup screen with node missing |
 | `no-auth` | the setup screen with no GitHub auth: get stack fails with the one actionable error |
 | `no-cli` | a valid stack whose command is not linked: the quiet [add stack command] line |
 | `cli-foreign` | the quiet line when something else owns the `stack` name (no offer) |
 | `no-path` | the quiet line when the bin dir is off PATH (no offer) |
+
+A `+update-available` or `+update-error` suffix on any scenario drives the
+footer updater fixture: `#populated+update-available,/project` offers the
+invented 0.1.9 (the startup event fires, and checks answer it; `[install]`
+streams progress), while `+update-error` fails checks. Without a suffix,
+checks answer up to date.

@@ -2,6 +2,11 @@
    index.tsx); this file only adds what the website has no use for:
    top bar, text buttons, inputs, chips, conflict callouts, op logs. */
 
+/* a wider column than the website's 96ch: rows carry a name, a meta column
+   and actions, and the narrow column wrapped them. */
+body { width: min(100%, 112ch); }
+.raw { font: inherit; } /* <pre> would fall back to the browser's monospace face and size */
+
 #shell { display: flex; flex-direction: column; min-height: calc(100vh - 92px); }
 #shell main { flex: 1 0 auto; animation-fill-mode: backwards; }
 
@@ -49,7 +54,7 @@ html { overscroll-behavior: none; }
 /* top bar ------------------------------------------------------------ */
 #topbar {
   display: flex; align-items: baseline; justify-content: space-between;
-  flex-wrap: wrap; gap: 0 3ch; margin-bottom: 40px;
+  flex-wrap: wrap; gap: 0 3ch; margin-bottom: 32px;
 }
 #topbar nav a.cur { color: var(--accent); }
 #topbar .sep { color: var(--ghost); margin: 0 1ch; }
@@ -57,6 +62,11 @@ html { overscroll-behavior: none; }
 #topbar .node { color: var(--dim); }
 #topbar .node.bad { color: var(--accent); }
 .appfoot { padding-top: 48px; }
+/* footer states arrive and leave quietly (up to date fades back to the link) */
+@media (prefers-reduced-motion: no-preference) {
+  .appfoot .fadein { animation: footfadein .8s ease-out; }
+  @keyframes footfadein { from { opacity: 0; } to { opacity: 1; } }
+}
 
 /* text buttons, inputs ------------------------------------------------ */
 .btn, .linklike {
@@ -91,6 +101,34 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .libhead .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .libgroup .rows { padding-left: 2ch; }
 
+/* quick import on browse rows ----------------------------------------- */
+.qirow { display: flex; align-items: baseline; }
+.qirow > a.row { flex: 1 1 auto; min-width: 0; }
+/* the cursor follows the whole row, including the action slot */
+.qi:hover .row::before { content: ">"; color: var(--dim); }
+.qiact { flex: none; min-width: 10ch; text-align: right; margin-left: 1ch; }
+/* the button idles dim and brightens when its row is hovered, focused
+   or under the keyboard cursor */
+.qiact .btn { opacity: .45; }
+.qi:hover .qiact .btn,
+.qi:focus-within .qiact .btn,
+.qirow > a.row[data-sel] + .qiact .btn { opacity: 1; }
+.qires, .qiask {
+  display: flex; flex-wrap: wrap; gap: 0 1ch; align-items: baseline;
+  padding-left: 3.5ch;
+}
+.qires > .oplog, .qires > .raw, .qires > p { flex: 1 1 100%; }
+.qires > .oplog { margin: 4px 0 8px; }
+.qires .qiline {
+  font: inherit; background: none; border: 0; padding: 0;
+  color: var(--dim); cursor: pointer; text-align: left;
+}
+.qires .qiline:hover { text-decoration: underline; text-underline-offset: 4px; }
+.qires .qiline:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
+
+/* dim key hint under every browse list (never in the entry detail) */
+.listhint { margin: 12px 0 0; }
+
 /* first-run onboarding: one question per screen ------------------------ */
 .onboard { max-width: 64ch; margin: 6vh auto 0; }
 .onboard .prompt { font-size: 20px; margin: 28px 0 20px; }
@@ -107,23 +145,86 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .onboard .btn.primary { color: var(--fg); }
 .onboard .btn.primary::before, .onboard .btn.primary::after { color: var(--accent); }
 
-/* status rows ---------------------------------------------------------- */
-.statusrow { margin-bottom: 12px; }
-.statusrow .sub {
+/* project page: one rhythm. Sections are 32px apart (heading 6px above its
+   rows), rows sit flush on the 24px line, extra info hangs under its row. */
+.project h2 { margin: 32px 0 6px; }
+.project > h2:first-child, .project > :first-child > h2:first-child { margin-top: 0; }
+.project .statusrow .sub {
   display: flex; flex-wrap: wrap; gap: 0 2ch; align-items: baseline;
-  padding-left: 2ch; font-size: 13px;
+  padding-left: calc(10ch + 1.5ch); line-height: 1.5; margin-bottom: 4px;
 }
-.statusrow .acts { margin-left: auto; display: flex; gap: 0 1ch; }
+.project .statusrow .sub > span { font-size: 13px; }
+.statusrow .chip { width: 10ch; text-align: left; }
+.project .row .lead { flex: 1 1 0; min-width: 0; }
+.project .statusrow .nm { flex-shrink: .15; }
+.row .meta { flex: 0 3 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .acts { flex: none; display: flex; gap: 0 1ch; margin-left: 1ch; }
+.row .btn.fix { display: inline-flex; justify-content: center; min-width: 9ch; }
+
+/* the set-up slot: just its button, on the 24px line */
+.project .setup { line-height: 24px; }
+
+/* adopt suggestions: next to the set-up slot, one line per folder, then the
+   quiet adopt other… link (the only thing shown with no candidates) */
+.project .adopt-block { line-height: 24px; }
+.project .setup + .adopt-block { margin-top: 12px; }
+.project .adopt-block .found { margin: 0; }
+.project .adopt-list { margin: 0 0 4px; }
+.project .adopt-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2ch; }
+
+/* sync, stack rev: one quiet line under the imports */
+.project .tools { display: flex; align-items: baseline; gap: 0 2ch; margin-top: 12px; }
+.project .tools .rev { margin-left: auto; }
+.project .adopt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2ch; margin-top: 4px; }
+
+/* presets: name, truncated description, counts, actions; a preview unfolds
+   as a tree directly under its row */
+.presets .row .nm { flex: 0 0 var(--pw, 10ch); }
+.presets .row .desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* truncated rows keep the same dotted leader as short ones, at least 2ch */
+.presets .row .lead { flex: 1 1 2ch; min-width: 2ch; }
+.pv .lead { flex: 1 1 0; min-width: 0; }
+.presets .row .cnt { flex: none; white-space: nowrap; }
+.pv { margin: 0 0 8px; padding-left: 2ch; }
+.pl { display: flex; align-items: baseline; gap: 0 1ch; min-width: 0; }
+.pl .lead { overflow: hidden; white-space: nowrap; color: var(--ghost); }
+.pl .lead::before { content: var(--dots); }
+.pl .br { color: var(--ghost); flex: none; }
+.pl .pt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl .dest, .pl.k-note { color: var(--dim); }
+.pl.k-here { color: var(--dim); }
+.pl.k-conflict { color: var(--accent); }
+.pl.k-conflict .pt::before { content: "! "; }
+.ptag { flex: none; color: var(--dim); white-space: nowrap; }
+.ptag::before { content: "("; }
+.ptag::after { content: ")"; }
+.pl.k-conflict .ptag { color: var(--accent); }
+/* presets heading line: count, fold marker, and (long lists) the filter,
+   pushed right so the heading does not move while it is typed in */
+.project h2.phead { display: flex; align-items: baseline; gap: 0 1ch; }
+.phead .fold {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer;
+}
+.phead .fold:hover { color: var(--accent); }
+.phead .fold:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
+.phead .pfilter { margin-left: auto; margin-bottom: 4px; width: 24ch; max-width: 40%; color: var(--fg); }
+/* the cut toggle is a plain text button; only its grid placement is its own */
+.presets .more { justify-self: start; line-height: 24px; }
+.presets .none { margin: 0; line-height: 24px; }
+.pv + .pv, .preset > .raw { margin-left: 2ch; }
 
 .chip { flex: none; }
 .chip::before { content: "("; color: var(--dim); }
 .chip::after { content: ")"; color: var(--dim); }
+/* clean rows leave the slot blank (no marker, no parens) */
+.chip:empty::before, .chip:empty::after { content: none; }
 .chip.imported { color: var(--dim); }
 .chip.edited, .chip.update, .chip.gone { color: var(--accent); }
 
 /* op logs + conflicts --------------------------------------------------- */
-.oplog { margin-top: 16px; }
-.opsec p { margin: 12px 0 4px; }
+.oplog { margin: 0; }
+.opsec p { margin: 8px 0 2px; }
 .opsec.conflict p::before { content: "! "; }
 .opsec.conflict .raw { color: var(--accent); }
 .conflict {
@@ -141,7 +242,7 @@ input[type="text"]::placeholder { color: var(--ghost); }
 
 @media (max-width: 640px) {
   #topbar .switchers { gap: 0 1.5ch; }
-  .statusrow .sub { padding-left: 0; }
-  .statusrow .acts { margin-left: 0; }
+  .project .statusrow .sub { padding-left: 0; }
+  .presets .row .cnt, .row .meta { display: none; }
   input[type="text"] { max-width: 100%; }
 }

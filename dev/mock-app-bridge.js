@@ -8,12 +8,28 @@
 // Bare `#empty` etc. still work (home route).
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
-// scan, noworker, noproject, bad-stack, fresh, no-auth, no-cli,
+// scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
+// imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
+// adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs),
+// quickimport (one of each inline-import row state), no-auth, no-cli,
 // cli-foreign, cli-elsewhere, no-path.
+// A `+update-available` or `+update-error` suffix on any scenario drives the
+// footer updater fixture (e.g. `#populated+update-available,/project`):
+// the former answers checks with 0.1.9 and fires the startup update event,
+// the latter fails checks.
 (() => {
   'use strict';
 
-  const scenario = ((location.hash || '#populated').slice(1).split(',')[0] || '').split('/')[0] || 'populated';
+  const rawScenario = ((location.hash || '#populated').slice(1).split(',')[0] || '').split('/')[0] || 'populated';
+  const [scenario, ...flags] = rawScenario.split('+');
+  // Footer updater fixture: 'available' offers 0.1.9 (check answers it and
+  // the startup event fires), 'error' fails checks, otherwise up to date.
+  const updaterMode = flags.includes('update-available')
+    ? 'available'
+    : flags.includes('update-error')
+      ? 'error'
+      : 'none';
+  const UPDATE_VERSION = '0.1.9';
 
   // ---------------------------------------------------------------- catalog
   // Rendered into the exact JSON shapes of tools/stack/cli.mjs --json (and
@@ -194,6 +210,33 @@
     return `.stack/${id}`;
   };
 
+  // `--to` validation, mirroring the Rust join_inside (paths.rs): absolute
+  // paths and lexical `..` escapes are rejected with the same messages, so
+  // mock runs don't hide real errors. The symlink check needs a filesystem,
+  // so the mock skips it.
+  const checkTo = (to) => {
+    if (to == null) return null;
+    if (!to || to.length > 512) return 'invalid path';
+    if (to.startsWith('/') || /^[A-Za-z]:[\\/]/.test(to)) {
+      return 'use a project-relative path, not an absolute one';
+    }
+    let depth = 0;
+    for (const seg of to.split('/')) {
+      if (!seg || seg === '.') continue;
+      if (seg === '..') {
+        depth--;
+        if (depth < 0) return 'path escapes the project directory';
+      } else depth++;
+    }
+    return null;
+  };
+
+  // The look-alike files an import aimed at `dest` would collide with: a
+  // `--to` elsewhere sidesteps them, a `--to` on top of them refuses, exactly
+  // like the real import plan.
+  const clashUnder = (id, dest) =>
+    (fx.lookalikeFor?.[id] ?? []).filter((f) => dest === '.' || f === dest || f.startsWith(`${dest}/`));
+
   // ---------------------------------------------------------- preset fixtures
   // Rendered into the exact JSON shapes of `preset list/show/apply --json`.
 
@@ -217,6 +260,57 @@
       ],
     },
   ];
+
+  // A bigger list for the many/manyfresh/lots scenarios: the first two are
+  // the real fixtures above, the rest combine catalog entries (names and
+  // descriptions invented, a few long enough to truncate).
+  const makePresets = (n) => {
+    const ids = CATALOG.filter((e) => e.committed !== false && !e.id.startsWith('workers/')).map((e) => e.id);
+    const more = [
+      ['api', 'Server starter: conventions, the file-pr skill and an AGENTS.md scaffold.'],
+      ['cli', 'Command line tool: conventions plus the ponytail skill for small changes.'],
+      ['desktop', 'Tauri + Solid desktop app: solid-js reference, button and the escacs mark, with the folio-light style on top.'],
+      ['mobile', 'Mobile web shell: button, icon button and the logo mark.'],
+      ['landing', 'Marketing page: folio-light style, the mark and a button.'],
+      ['lib', 'Library repo: conventions and agents-md.'],
+      ['monorepo', 'Workspace root: AGENTS.md, conventions and the review skills for every package.'],
+      ['review', 'Review setup: file-pr and ponytail.'],
+      ['design', 'Design handoff: folio-light, the mark and the button set.'],
+      ['agents', 'Agent scaffold: agents-md plus conventions.'],
+      ['data', 'Data project: conventions only.'],
+      ['game', 'Game jam: ponytail, the mark and a button.'],
+      ['oss', 'Open source repo: conventions, agents-md and file-pr, so contributors land on the same rules.'],
+      ['site', 'Static site: folio-light and the mark.'],
+      ['pr-only', 'Just the pull request skill.'],
+      ['icons', 'Icon set: icon-button and the mark.'],
+      ['tiny', 'The smallest useful setup.'],
+      ['solid', 'SolidJS app: solid-js reference and the button.'],
+      ['react-ui', 'React UI kit: button and icon button.'],
+      ['writing', 'Writing project: folio-light and conventions.'],
+      ['plugin', 'Plugin repo: AGENTS.md and the ponytail skill.'],
+      ['infra', 'Infra repo: conventions, no UI.'],
+      ['playground', 'Throwaway sandbox with every skill.'],
+      ['brand', 'Brand kit: mark, folio-light, button.'],
+      ['audit', 'Audit trail: conventions and file-pr.'],
+      ['docs-site', 'Docs site: folio-light, conventions and agents-md.'],
+      ['extension', 'Browser extension: button, icon button, mark.'],
+      ['bot', 'Chat bot: conventions, ponytail and agents-md.'],
+      ['kiosk', 'Kiosk app: solid-js reference, button, mark and the folio-light style for a clean full screen layout.'],
+      ['handoff', 'Hand a repo to a new owner: conventions and agents-md.'],
+      ['starter-kit', 'Everything small: file-pr, ponytail and the mark.'],
+      ['studio', 'Design studio repo: style, mark and button.'],
+    ];
+    const pick = (i, k) => Array.from({ length: k }, (_, j) => ids[(i * 3 + j * 2) % ids.length]);
+    const out = [...PRESETS];
+    for (let i = 0; out.length < n && i < more.length; i++) {
+      const [name, description] = more[i];
+      out.push({
+        name, description, source: `presets/${name}.json`,
+        imports: [...new Set(pick(i + 1, 1 + (i % 3)))].map((id) => ({ id, to: null })),
+      });
+    }
+    return out;
+  };
 
   // ------------------------------------------------------------- scenarios
 
@@ -345,6 +439,45 @@
         'skills/file-pr': ['.agents/skills/file-pr/SKILL.md', '.agents/skills/file-pr/helpers.mjs'],
       },
     }),
+    // Adopt suggestions: folders that look like entries but were never
+    // imported. adopt0 has only a non-matching folder (nothing to adopt),
+    // adopt1 one identical folder, adopt3 three — ponytail with differing
+    // files, for the refusal. adopt1 and adopt3 have no stack.toml, so the
+    // init button sits next to the suggestions.
+    adopt0: () => ({ ...SCENARIOS.populated(), folders: ['.agents/skills/my-own-thing'] }),
+    adopt1: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({ path, valid: true, markers: ['.agents/skills', '.git'], errors: [] }),
+      lock: [],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      folders: ['.agents/skills/ponytail'],
+      fresh: true,
+    }),
+    adopt3: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({ path, valid: true, markers: ['.agents/skills', '.git'], errors: [] }),
+      lock: [],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      folders: [
+        '.agents/skills/file-pr',
+        '.agents/skills/ponytail',
+        '.stack/systems/engineering-conventions',
+      ],
+      lookalikeFor: {
+        'skills/ponytail': ['.agents/skills/ponytail/SKILL.md'],
+      },
+      fresh: true,
+    }),
     scan: () => ({
       config: {
         ...baseConfig,
@@ -413,6 +546,37 @@
       pick: '/home/dev/projects/sandbox',
       fresh: true,
     }),
+    // Many presets: the presets section must scale. `many` has three
+    // imports (the section starts collapsed), `manyfresh` has none (set-up
+    // slot, section open), `lots` has 33 presets and three imports.
+    many: () => ({ ...SCENARIOS.populated(), presets: makePresets(15) }),
+    manyfresh: () => ({ ...SCENARIOS.fresh(), presets: makePresets(15) }),
+    lots: () => ({ ...SCENARIOS.populated(), presets: makePresets(40) }),
+    // Inline row imports: all four row states in one catalog.
+    // skills/file-pr is already imported (the `(imported)` row);
+    // skills/ponytail imports plain with the default destination;
+    // components/react/button needs a --to and pulls icon-button (+1 dep);
+    // styles/folio-light refuses with look-alikes unless given a --to.
+    quickimport: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({
+        path, valid: true,
+        markers: ['stack.toml', '.agents/skills', '.git'],
+        errors: [],
+      }),
+      lock: [
+        { id: 'skills/file-pr', commit: FULL, path: '.agents/skills/file-pr', local: [], upstream: [] },
+      ],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      lookalikeFor: {
+        'styles/folio-light': ['.agents/skills/folio-light/SKILL.md', '.agents/skills/folio-light/theme.json'],
+      },
+    }),
     // First-run gate: nothing validates, the app must show StackSetup.
     // get stack clones and the gate lifts (see the provision_stack handler).
     'bad-stack': () => ({
@@ -471,6 +635,7 @@
   };
 
   const fx = (SCENARIOS[scenario] ?? SCENARIOS.populated)();
+  const presets = () => fx.presets ?? PRESETS;
   // Provision + stack-command fixtures default to the settled state (a kept
   // checkout, the command linked); scenarios above override what they need.
   fx.provision ??= { status: 'kept', path: '/home/dev/escacs/stack', message: 'already at ~/escacs/stack' };
@@ -507,6 +672,11 @@
   function stack({ subcommand: sub, args = [] }) {
     if (!fx.node.ok) return errOut('node 22+ is required (fixture: no-node scenario)');
     const { json, dryRun, kind, to, file, positional } = splitArgs(args);
+    // Same gate as the Rust argv builder: only import and preset apply take
+    // --dry-run (and only apply within preset; list/show reject it below).
+    if (dryRun && sub !== 'import' && sub !== 'preset') {
+      return errOut('--dry-run is only supported by import and preset apply');
+    }
     const visible = CATALOG.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
     switch (sub) {
       case 'list': {
@@ -564,9 +734,38 @@
       case 'import': {
         const ids = positional;
         if (to && ids.length > 1) return errOut('--to works with one id at a time');
+        const badTo = checkTo(to);
+        if (badTo) return errOut(badTo);
         const log = [];
         const imported = [];
         const already = [];
+        // A dry run plans without writing: look-alike collisions are
+        // reported in `conflicts`, not thrown. The project page uses it to
+        // learn whether an adoptable folder is identical or differs.
+        if (dryRun) {
+          const conflicts = [];
+          for (const id of ids) {
+            const e = visible.find((x) => x.id === id);
+            if (!e || e.committed === false) {
+              return errOut(`${id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
+            }
+            if (fx.lock.some((r) => r.id === id)) {
+              already.push(id);
+              continue;
+            }
+            const clash = clashUnder(id, to || destFor(id));
+            if (clash.length) conflicts.push(...clash);
+            imported.push({ id, path: to || destFor(id) });
+          }
+          if (!json) {
+            return okOut([
+              ...imported.map((p) => `import  ${p.id} -> ${p.path}`),
+              ...conflicts.map((c) => `CONFLICT ${c} (exists with other content; a real import would abort)`),
+              'dry run: nothing written',
+            ].join('\n'));
+          }
+          return jsonOut({ command: 'import', dryRun: true, commit: FULL, imported, already, conflicts, gitignore: 'unchanged' });
+        }
         for (const id of ids) {
           const e = visible.find((x) => x.id === id);
           if (!e || e.committed === false) {
@@ -577,8 +776,8 @@
             already.push(id);
             continue;
           }
-          const clash = !to && fx.lookalikeFor?.[id];
-          if (clash) {
+          const clash = clashUnder(id, to || destFor(id));
+          if (clash.length) {
             return errOut(`these files already exist with other content; move them or choose --to:\n  ${clash.join('\n  ')}`);
           }
           const dest = to || destFor(id);
@@ -594,18 +793,31 @@
             }
           }
         }
+        // Like the real CLI, a successful import creates stack.toml
+        // implicitly: a fresh fixture gains the marker from here on.
+        if (fx.fresh) {
+          fx.report = (path) => ({ path, valid: true, markers: ['stack.toml', '.git', 'package.json'], errors: [] });
+          fx.fresh = false;
+        }
         if (!json) return okOut(log.join('\n'));
         return jsonOut({ command: 'import', commit: FULL, imported, already, gitignore: 'unchanged' });
       }
       case 'preset': {
         const [action, name] = positional;
+        // Same gates as the Rust argv builder: no valued flags on any preset
+        // action, and --dry-run on apply only.
+        if (to != null || kind != null || file != null) {
+          return errOut('preset takes no --kind/--to/--ref/--file');
+        }
         if (action === 'list') {
-          const rows = PRESETS.map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
+          if (dryRun) return errOut('preset list takes no --dry-run');
+          const rows = presets().map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
           if (!json) return okOut(rows.length ? rows.map((p) => `- ${p.name}: ${p.description}`).join('\n') : 'No presets.');
           return jsonOut({ command: 'preset', action: 'list', count: rows.length, presets: rows });
         }
         if (action === 'show') {
-          const p = PRESETS.find((x) => x.name === name);
+          if (dryRun) return errOut('preset show takes no --dry-run');
+          const p = presets().find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           if (!json) {
             return okOut([
@@ -616,13 +828,26 @@
           return jsonOut({ command: 'preset', action: 'show', preset: structuredClone(p) });
         }
         if (action === 'apply') {
-          const p = PRESETS.find((x) => x.name === name);
+          const p = presets().find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           // Mirrors the import case: same log lines, same lock updates, same
-          // auto-import of requires. A dry run reports without writing.
+          // auto-import of requires, same look-alike refusal. A dry run
+          // reports conflicts as part of the plan instead of throwing.
           const log = [];
           const imported = [];
           const already = [];
+          const conflicts = [];
+          // Like the real import plan, a refusal aborts before anything is
+          // written: collect every clash up front. A dry run reports them
+          // as part of the plan instead of throwing.
+          for (const imp of p.imports) {
+            if (!fx.lock.some((r) => r.id === imp.id)) {
+              conflicts.push(...clashUnder(imp.id, imp.to || destFor(imp.id)));
+            }
+          }
+          if (conflicts.length && !dryRun) {
+            return errOut(`these files already exist with other content; move them or choose --to:\n  ${conflicts.join('\n  ')}`);
+          }
           for (const imp of p.imports) {
             const e = visible.find((x) => x.id === imp.id);
             if (!e || e.committed === false) {
@@ -646,10 +871,16 @@
               }
             }
           }
+          // A real apply creates stack.toml implicitly, like import; a dry
+          // run writes nothing.
+          if (!dryRun && fx.fresh) {
+            fx.report = (path) => ({ path, valid: true, markers: ['stack.toml', '.git', 'package.json'], errors: [] });
+            fx.fresh = false;
+          }
           if (!json) return okOut(log.join('\n'));
           return jsonOut({
             command: 'preset', action: 'apply', preset: name, commit: FULL,
-            imported, already, ...(dryRun ? { conflicts: [] } : {}), gitignore: 'unchanged',
+            imported, already, ...(dryRun ? { dryRun: true, conflicts } : {}), gitignore: 'unchanged',
           });
         }
         return errOut(`unknown preset action "${action}"`);
@@ -746,7 +977,60 @@
 
   // ---------------------------------------------------------------- handlers
 
+  // Callback registry behind the mocked transformCallback, so the updater
+  // plugin's Channel and the startup update-event listen() work.
+  let nextCallbackId = 1;
+  const callbacks = new Map();
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Invented release behind the updater fixture (see the +update-* flags).
+  const updateMetadata = () => ({
+    rid: 1,
+    currentVersion: '0.1.0',
+    version: UPDATE_VERSION,
+    date: '2026-11-12T00:00:00Z',
+    body: 'Fixture release notes for the footer updater states.',
+    rawJson: { version: UPDATE_VERSION, notes: 'fixture', pub_date: '2026-11-12T00:00:00Z' },
+  });
+
+  async function mockDownloadAndInstall(a) {
+    // Streams Started/Progress/Finished at the Channel the plugin passed,
+    // the way the Rust side would; slow enough to screenshot mid-flight.
+    const ch = a?.onEvent;
+    const emit = (m) => ch?.onmessage?.(m);
+    const total = 3145728;
+    emit({ event: 'Started', data: { contentLength: total } });
+    for (let i = 0; i < 4; i++) {
+      await sleep(250);
+      emit({ event: 'Progress', data: { chunkLength: total / 4 } });
+    }
+    await sleep(250);
+    emit({ event: 'Finished', data: {} });
+    return null;
+  }
+
   const handlers = {
+    // Updater plugin surface (the footer drives these; install streams
+    // progress, relaunch and close are silent no-ops).
+    'plugin:updater|check': async () => {
+      await sleep(700);
+      if (updaterMode === 'error') throw 'fixture: the release feed is unreachable (mock +update-error)';
+      return updaterMode === 'available' ? updateMetadata() : null;
+    },
+    'plugin:updater|download_and_install': mockDownloadAndInstall,
+    'plugin:process|restart': async () => null,
+    'plugin:resources|close': async () => null,
+    // Event listen: only the startup update event is emulated, and only
+    // under +update-available (fires once, shortly after boot subscribes).
+    'plugin:event|listen': async ({ event, handler }) => {
+      if (event === 'stack://update-available' && updaterMode === 'available') {
+        const cb = callbacks.get(handler);
+        if (cb) setTimeout(() => cb({ event, payload: { version: UPDATE_VERSION } }), 400);
+      }
+      return nextCallbackId++;
+    },
+    'plugin:event|unlisten': async () => null,
     pick_folder: async () => fx.pick,
     get_config: async () => structuredClone(fx.config),
     save_config: async ({ config }) => {
@@ -758,6 +1042,7 @@
       return structuredClone(fx.config);
     },
     validate_project: async ({ path }) => fx.report(path),
+    project_folders: async () => ({ folders: [...(fx.folders ?? [])] }),
     node_status: async () => ({ ...fx.node }),
     // Release version the footer shows (mirrors tauri.conf in the real app).
     'plugin:app|version': async () => '0.1.0',
@@ -820,6 +1105,14 @@
         return null;
       }
       return fn(args);
+    },
+    transformCallback: (cb) => {
+      const id = nextCallbackId++;
+      callbacks.set(id, cb);
+      return id;
+    },
+    unregisterCallback: (id) => {
+      callbacks.delete(id);
     },
     // No-op event surface; the shell currently emits no events.
     listen: async () => () => {},

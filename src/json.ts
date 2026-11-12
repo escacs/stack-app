@@ -87,6 +87,17 @@ export type ImportJson = {
   gitignore: 'updated' | 'unchanged';
 };
 
+/** `import --dry-run --json`: the plan plus its collisions; writes nothing. */
+export type ImportDryRunJson = {
+  command: 'import';
+  dryRun: boolean;
+  commit: string;
+  imported: { id: string; path: string; requiredBy?: string }[];
+  already: string[];
+  conflicts: string[];
+  gitignore: 'updated' | 'unchanged';
+};
+
 export type SyncJson = {
   command: 'sync';
   restored: string[];
@@ -147,6 +158,8 @@ export type PresetApplyJson = {
   command: 'preset';
   action: 'apply';
   preset: string;
+  /** Dry-run only: true when nothing was written. Absent on a real apply. */
+  dryRun?: boolean;
   commit: string;
   imported: { id: string; path: string; requiredBy?: string }[];
   already: string[];
@@ -312,6 +325,40 @@ export function importArgs(id: string, to: string): string[] {
   return dest ? [id, '--to', dest, '--json'] : [id, '--json'];
 }
 
+/**
+ * Where `import <id>` lands without --to, mirroring imports.mjs: skills and
+ * styles go to .agents/skills/<name>, payload entries (templates) mirror at
+ * the project root, everything else under .stack/<id>. The row button shows
+ * this as its hover text; the CLI stays authoritative for the real path.
+ */
+export function defaultImportDest(e: Pick<JsonEntry, 'id' | 'kind' | 'name' | 'payload'>): string {
+  if (e.kind === 'skill' || e.kind === 'style') return `.agents/skills/${e.name}`;
+  if (e.payload) return '.';
+  return `.stack/${e.id}`;
+}
+
+/**
+ * Whether the row must ask for a destination instead of importing blindly.
+ * The CLI never *requires* --to (there is always a fallback), but its own
+ * usage text imports `copy` entries as `import <id> --to <dir>`: without a
+ * destination a component lands in .stack/, not in the source tree. Payload
+ * entries (templates) are the exception: their default mirrors the project
+ * root, which is the documented landing spot.
+ */
+export function needsImportDest(e: Pick<JsonEntry, 'usage' | 'payload'>): boolean {
+  return e.usage === 'copy' && !e.payload;
+}
+
+/**
+ * Prefill for the inline destination field: components follow the
+ * `src/components/<name>` convention (the CLI's own hint for member
+ * imports). Anything else needing a destination has no catalog convention,
+ * so the field opens empty.
+ */
+export function importDestHint(e: Pick<JsonEntry, 'kind' | 'name'>): string | null {
+  return e.kind === 'component' ? `src/components/${e.name}` : null;
+}
+
 /** Args for `preset list` / `preset show <name>` / `preset apply <name>`. */
 export function presetListArgs(): string[] {
   return ['list', '--json'];
@@ -329,6 +376,96 @@ export function presetApplyArgs(name: string, dryRun = false): string[] {
 export function presetImportsHint(imports: PresetImport[]): string {
   if (!imports.length) return 'no imports';
   return imports.map((i) => (i.to ? `${i.id} → ${i.to}` : i.id)).join(', ');
+}
+
+/**
+ * A stale-completion guard: an async answer may only land when no generation
+ * bump happened since it was requested. Preset previews carry the project
+ * page's op sequence (bumped on every op start); row imports carry the
+ * browse page's own generation (bumped on navigation and project switch). A
+ * mismatch means the world moved mid-flight, so the answer is dropped.
+ */
+export function previewFresh(requestSeq: number, opSeqNow: number): boolean {
+  return requestSeq === opSeqNow;
+}
+
+/**
+ * A preset row's compact counts against the lock: "2 new" ("all here" when
+ * nothing is new). Once a preview has named `deps` auto-imported
+ * dependencies, " · N dep" is appended so the row agrees with the preview.
+ */
+export function presetCountText(imports: PresetImport[], ids: Set<string>, deps: number): string {
+  const fresh = imports.filter((i) => !ids.has(i.id)).length;
+  const base = fresh ? `${fresh} new` : 'all here';
+  return deps > 0 ? `${base} · ${deps} dep` : base;
+}
+
+/** The row counts spelled out, for the tooltip: "2 imports, 1 new, 1 dependency". */
+export function presetCountTitle(imports: PresetImport[], ids: Set<string>, deps: number): string {
+  const fresh = imports.filter((i) => !ids.has(i.id)).length;
+  const n = `${imports.length} import${imports.length === 1 ? '' : 's'}`;
+  const base = fresh ? `${n}, ${fresh} new` : `${n}, all here`;
+  return deps > 0 ? `${base}, ${deps} ${deps === 1 ? 'dependency' : 'dependencies'} (named by the preview)` : base;
+}
+
+/** Rows a long presets list shows before its `+N more` toggle. */
+export const PRESET_ROWS = 5;
+/** More presets than this earns the type-to-filter input. */
+export const PRESET_FILTER_MIN = 8;
+
+/** Whether the presets section needs a filter input at this list size. */
+export function presetsFilterable(total: number): boolean {
+  return total > PRESET_FILTER_MIN;
+}
+
+/**
+ * Whether the presets section starts unfolded. A project that already has
+ * imports treats presets as a starting point, so a list longer than the
+ * default row count starts folded to its heading; a short list, or any list
+ * in a project with nothing imported yet, is open.
+ */
+export function presetsStartOpen(total: number, imported: number): boolean {
+  return imported === 0 || total <= PRESET_ROWS;
+}
+
+/**
+ * Presets matching a typed filter: every space-separated term must appear,
+ * case-insensitively, in the name or the description. An empty filter keeps
+ * everything.
+ */
+export function matchPresets(list: PresetListItem[], query: string): PresetListItem[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return list;
+  return list.filter((p) => {
+    const hay = `${p.name} ${p.description}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+/**
+ * The rows to draw: the filter's matches, cut to `limit` unless `all`. The
+ * preset whose preview is open (`pinned`) always stays, in its place in the
+ * list, even when the filter or the cut would hide it. `hidden` counts
+ * matches left out (what `+N more` would reveal).
+ */
+export function visiblePresets(
+  list: PresetListItem[],
+  query: string,
+  all: boolean,
+  pinned: string | null,
+  limit: number = PRESET_ROWS,
+): { rows: PresetListItem[]; hidden: number } {
+  const matches = new Set(matchPresets(list, query));
+  const rows: PresetListItem[] = [];
+  let seen = 0;
+  let hidden = 0;
+  for (const p of list) {
+    const match = matches.has(p);
+    const idx = match ? seen++ : -1;
+    if (p.name === pinned || (match && (all || idx < limit))) rows.push(p);
+    else if (match) hidden++;
+  }
+  return { rows, hidden };
 }
 
 // ------------------------------------------------------------------ op summaries
@@ -354,6 +491,30 @@ export function describeImport(r: ImportJson): OpSection[] {
   }
   if (!secs.length) secs.push({ title: 'nothing to do', lines: [], tone: 'dim' });
   return secs;
+}
+
+/**
+ * The inline one-liner after a row import: `imported → <path>`, plus `+N
+ * dep` when the import pulled in entries required by others
+ * (ImportJson.requiredBy). A row that landed in `already` (imported
+ * elsewhere between the list and the click) reads `already here`.
+ */
+export function quickImportLine(r: ImportJson, id: string): string {
+  const main = r.imported.find((p) => p.id === id) ?? r.imported[0];
+  if (!main) return r.already.includes(id) ? 'already here' : 'imported';
+  const deps = r.imported.filter((p) => p.requiredBy).length;
+  const base = `imported → ${main.path}`;
+  return deps ? `${base} +${deps} dep` : base;
+}
+
+/** The inline one-liner for a failed row import: the first stderr line, capped. */
+export function quickImportError(stderrText: string): string {
+  const first = stderrText
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!first) return 'import failed';
+  return first.length > 100 ? `${first.slice(0, 99)}…` : first;
 }
 
 /** Render an update --json result as display sections. */
@@ -418,6 +579,55 @@ export function describePresetApply(r: PresetApplyJson): OpSection[] {
   if (idle >= 0) secs[idle] = sec;
   else secs.unshift(sec);
   return secs;
+}
+
+/**
+ * One line of a preset dry-run preview. `new` and `dep` would land at `path`
+ * (a `dep` was pulled in by another entry: `title` names which), `here` is
+ * already imported, `conflict` is a file that would collide, `note` is
+ * plain information. `tag` is the short dim label; `title` the long reason.
+ */
+export type PreviewLine = {
+  kind: 'new' | 'dep' | 'here' | 'conflict' | 'note';
+  id: string;
+  path?: string;
+  tag?: string;
+  title?: string;
+};
+
+/**
+ * Render a preset dry-run (`preset apply <name> --dry-run --json`) as one
+ * line per entry: what would collide first, then what would land where
+ * (dependencies tagged), then what is already imported. No line ever claims
+ * a write.
+ */
+export function describePresetPreview(r: PresetApplyJson): PreviewLine[] {
+  const lines: PreviewLine[] = [];
+  for (const f of r.conflicts ?? []) {
+    lines.push({
+      kind: 'conflict',
+      id: f,
+      tag: 'exists',
+      title: 'would collide: this file already exists with other content. nothing was written',
+    });
+  }
+  for (const p of r.imported) {
+    lines.push(
+      p.requiredBy
+        ? { kind: 'dep', id: p.id, path: p.path, tag: 'dep', title: `required by ${p.requiredBy}` }
+        : { kind: 'new', id: p.id, path: p.path },
+    );
+  }
+  for (const id of r.already) {
+    lines.push({ kind: 'here', id, tag: '✓ here', title: 'already imported' });
+  }
+  if (r.gitignore === 'updated') {
+    lines.push({ kind: 'note', id: '.gitignore', path: 'managed escacs block updates' });
+  }
+  if (!lines.length) {
+    lines.push({ kind: 'note', id: 'nothing new: everything already here' });
+  }
+  return lines;
 }
 
 /** Render a remove --json result as display sections. */

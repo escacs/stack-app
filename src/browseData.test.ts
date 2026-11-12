@@ -3,6 +3,7 @@
 // (concurrency limit, in-flight dedupe, skip-when-not-live, cache rules).
 import { describe, expect, it } from 'vitest';
 import {
+  CATALOG_NAME,
   buildIndex,
   byKindOrder,
   createFetchCache,
@@ -90,24 +91,28 @@ describe('sameRoute', () => {
 });
 
 describe('crumbParts', () => {
+  it('heads the trail with the catalog name', () => {
+    expect(CATALOG_NAME).toBe('stack');
+  });
+
   it('home is a single crumb; searching collapses to home', () => {
-    expect(crumbParts({ kind: 'home' }, false)).toEqual([{ label: '~', target: null }]);
-    expect(crumbParts({ kind: 'all' }, true)).toEqual([{ label: '~', target: { to: 'home' } }]);
+    expect(crumbParts({ kind: 'home' }, false)).toEqual([{ label: CATALOG_NAME, target: null }]);
+    expect(crumbParts({ kind: 'all' }, true)).toEqual([{ label: CATALOG_NAME, target: { to: 'home' } }]);
   });
 
   it('kind and all trails carry no leading slash in their labels', () => {
-    expect(crumbParts({ kind: 'kind', kindSingular: 'skill' }, false).map((p) => p.label)).toEqual(['~', 'skills']);
-    expect(crumbParts({ kind: 'all' }, false).map((p) => p.label)).toEqual(['~', 'all']);
+    expect(crumbParts({ kind: 'kind', kindSingular: 'skill' }, false).map((p) => p.label)).toEqual([CATALOG_NAME, 'skills']);
+    expect(crumbParts({ kind: 'all' }, false).map((p) => p.label)).toEqual([CATALOG_NAME, 'all']);
   });
 
   it('nested ids show their path below the kind, linked only when a file is open', () => {
     expect(crumbParts({ kind: 'entry', id: 'components/react/button', file: null }, false)).toEqual([
-      { label: '~', target: { to: 'home' } },
+      { label: CATALOG_NAME, target: { to: 'home' } },
       { label: 'components', target: { to: 'kind', kindSingular: 'component' } },
       { label: 'react/button', target: null },
     ]);
     expect(crumbParts({ kind: 'entry', id: 'components/react/button', file: 'src/x.tsx' }, false)).toEqual([
-      { label: '~', target: { to: 'home' } },
+      { label: CATALOG_NAME, target: { to: 'home' } },
       { label: 'components', target: { to: 'kind', kindSingular: 'component' } },
       { label: 'react/button', target: { to: 'entry', id: 'components/react/button' } },
       { label: 'x.tsx', target: null },

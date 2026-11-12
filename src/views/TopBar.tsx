@@ -3,14 +3,14 @@
 // and the node face only when node is broken.
 import { For, Show } from 'solid-js';
 import { busy, chooseProject, config, node, project, switchWorker, workerName } from '../store';
-import { href } from '../router';
+import { href, resolveView } from '../router';
 import { shortPath } from '../onboard';
 
-const NAV = ['browse', 'installed'] as const;
+const NAV = ['project', 'browse'] as const;
 
 export default function TopBar(props: { scenario: string; segs: string[] }) {
-  const view = () => props.segs[0] ?? '';
-  const cur = (seg: string) => (seg === 'browse' ? view() === '' || view() === 'browse' : view() === seg);
+  const view = () => resolveView(props.segs);
+  const cur = (seg: string) => view() === seg;
   return (
     <header id="topbar">
       <nav aria-label="views">
