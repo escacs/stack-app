@@ -129,7 +129,7 @@ input[type="text"]::placeholder { color: var(--ghost); }
   display: flex; flex-wrap: wrap; gap: 0 1.5ch; align-items: baseline;
   background: var(--bg); padding: 4px 0; margin-bottom: 8px;
 }
-.batchbar > .raw, .batchbar > .batchref { flex: 1 1 100%; }
+.batchbar > .raw, .batchbar > .batchref { flex: 1 0 100%; }
 .batchbar > .raw { margin: 4px 0 8px; }
 .batchref { margin: 4px 0; }
 .batchref > .raw { margin: 2px 0 6px; }

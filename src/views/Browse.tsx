@@ -561,6 +561,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       clearDryTimer();
       dryGen++;
       setBatch(null);
+      focusList();
     } else if (b?.phase === 'running') {
       setBatch({ ...b, cancel: true });
     }
@@ -697,6 +698,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     if (inputEl) inputEl.value = '';
   };
 
+  /** After the bar closes (dismiss/cancel), focus returns to the list: the cursor row, else the prompt. */
+  const focusList = (): void => {
+    const i = sel();
+    const row = i >= 0 ? (document.querySelector(`[data-row="${i}"]`) as HTMLElement | null) : null;
+    if (row) row.focus();
+    else if (matchMedia('(hover: hover)').matches) inputEl?.focus();
+  };
+
   /**
    * Stale-while-revalidate: a cached catalog renders at once and refreshes in
    * the background; `loading…` shows only when this source has no cache yet.
@@ -792,7 +801,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           ev.preventDefault();
           const b = batch();
           if (b?.phase === 'confirm' || b?.phase === 'running') cancelBatch();
-          else if (b?.phase === 'done') setBatch(null);
+          else if (b?.phase === 'done') {
+            setBatch(null);
+            focusList();
+          }
           else if (selected().size) clearSelection();
           else if (q()) clearQuery();
           else up();
@@ -810,10 +822,12 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           return;
         }
       }
-      // `a` selects every not-imported row in the list, gated like `i` so a
-      // search starting with `a` still types.
+      // `a` selects every not-imported row in the list whenever one is
+      // showing, no cursor needed. Text fields keep the key (the early
+      // return above) and the search box keeps it here, so typing `a`
+      // still works everywhere it should.
       if (ev.key === 'a' && t !== inputEl) {
-        if (selEntry()) {
+        if (orderedEntries().length) {
           ev.preventDefault();
           selectAllNotImported();
           return;
@@ -951,7 +965,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         onCancel={cancelBatch}
         onToggleConfirm={() => setBatch((b) => (b?.phase === 'confirm' ? { ...b, expanded: !b.expanded } : b))}
         onToggleDone={() => setBatch((b) => (b?.phase === 'done' ? { ...b, expanded: !b.expanded } : b))}
-        onDismiss={() => setBatch(null)}
+        onDismiss={() => {
+          setBatch(null);
+          focusList();
+        }}
       />
       <Show when={!note()} fallback={<CliErr text={note() as string} />}>
         <Switch>
@@ -1165,6 +1182,18 @@ function BatchBar(props: {
   const confirm = () => batchConfirm(props.batch);
   const running = () => batchRunning(props.batch);
   const done = () => batchDone(props.batch);
+  let confirmBar: HTMLDivElement | undefined;
+  let importBtn: HTMLButtonElement | undefined;
+  // Focus [import] once the confirm is actionable, unless the user already
+  // moved into the bar (e.g. typing in `to:`). The button remounts with
+  // every confirm, so the marker fires once per confirm.
+  createEffect(() => {
+    const b = confirm();
+    if (!b || b.checking || !importBtn) return;
+    if (importBtn.dataset.armed) return;
+    importBtn.dataset.armed = '1';
+    if (!confirmBar?.contains(document.activeElement)) importBtn.focus();
+  });
   return (
     <>
       <Show when={confirm()}>
@@ -1185,8 +1214,8 @@ function BatchBar(props: {
             ...errors().map((t) => `${t.id} — ${(b().dry.get(t.id) as { error: string }).error.split('\n')[0]}`),
           ];
           return (
-            <div class="batchbar">
-              <span>{`${b().label}: ${batchConfirmText({ count: b().targets.length, needDest: uncovered(), conflicts: hits().length, skipped: skipped() })}`}</span>
+            <div class="batchbar" ref={confirmBar}>
+              <span role="status">{`${b().label}: ${batchConfirmText({ count: b().targets.length, needDest: uncovered(), conflicts: hits().length, skipped: skipped() })}`}</span>
               <Show when={b().checking} fallback={
                 <Show when={lines().length > 0}>
                   <button
@@ -1222,7 +1251,12 @@ function BatchBar(props: {
                   }}
                 />
               </Show>
-              <button class="btn" disabled={b().checking || !b().targets.length} onClick={() => props.onRun()}>
+              <button
+                class="btn"
+                ref={importBtn}
+                disabled={b().checking || !b().targets.length}
+                onClick={() => props.onRun()}
+              >
                 import
               </button>
               <button class="linklike" title="close without importing" onClick={() => props.onCancel()}>
@@ -1248,7 +1282,7 @@ function BatchBar(props: {
       <Show when={done()}>
         {(b) => (
           <div class="batchbar">
-            <span>{`${b().label}: ${batchSummary(b().counts)}`}</span>
+            <span role="status">{`${b().label}: ${batchSummary(b().counts)}`}</span>
             <Show when={b().counts.refused > 0}>
               <button
                 class="btn"

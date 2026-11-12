@@ -379,9 +379,10 @@ Two ways to import several entries at once:
   cursor row) and more rows — `Shift`-click and `Ctrl`-click work on the
   rows too, `Shift`+arrows extend from the keyboard, and a gutter press
   can be dragged across rows. Selected rows carry a `*` in the gutter.
-  `a` selects every not-imported row in the list (with the cursor on the
-  list, like `i`). A quiet `N selected [import] [clear]` bar sits under
-  the prompt while anything is selected.
+  `a` selects every not-imported row in the list (whenever a list is
+  showing, no cursor needed — except while typing in a text field). A
+  quiet `N selected [import] [clear]` bar sits under the prompt while
+  anything is selected.
 
 Either way, more than one entry gets a dry-run confirm line first —
 nothing is written until it is confirmed:
