@@ -200,7 +200,7 @@ export default function Project(props: { scenario: string }) {
   }
 
   return (
-    <div>
+    <div class="project">
       <Show when={report()?.errors?.[0]}>
         {(e) => <p class="conflict" role="alert">{e()}</p>}
       </Show>
@@ -230,11 +230,13 @@ export default function Project(props: { scenario: string }) {
           </p>
         </Show>
         <Show when={lock().rows.length} fallback={<Show when={!lockError() && !needsInit()}><Empty>(._.) nothing imported</Empty></Show>}>
+          <h2>imports</h2>
           <div class="rows">
             <For each={lock().rows}>
               {(r) => {
                 const upstream = r.upstreamCount ?? 0;
                 const canUpdate = !r.gone && upstream > 0;
+                const where = `@${r.commit.slice(0, 7)} → ${r.path}`;
                 return (
                   <div class="statusrow">
                     <div class="row">
@@ -243,20 +245,7 @@ export default function Project(props: { scenario: string }) {
                         {r.id}
                       </a>
                       <span class="lead" aria-hidden="true" />
-                      <span class="dimtxt">@{r.commit.slice(0, 7)} → {r.path}</span>
-                    </div>
-                    <div class="sub">
-                      <Show when={r.gone}>
-                        <span class="dimtxt">removed from stack</span>
-                      </Show>
-                      <Show when={canUpdate}>
-                        <span>
-                          {upstream} file{upstream === 1 ? '' : 's'} changed upstream
-                        </span>
-                      </Show>
-                      <Show when={r.local.length}>
-                        <span class="dimtxt">edited: {r.local.join(', ')}</span>
-                      </Show>
+                      <span class="meta dimtxt" title={where}>{where}</span>
                       <span class="acts">
                         <Show when={canUpdate}>
                           <button
@@ -278,16 +267,34 @@ export default function Project(props: { scenario: string }) {
                         </button>
                       </span>
                     </div>
+                    <Show when={r.gone || canUpdate || r.local.length}>
+                      <div class="sub">
+                        <Show when={r.gone}>
+                          <span class="dimtxt">removed from stack</span>
+                        </Show>
+                        <Show when={canUpdate}>
+                          <span>
+                            {upstream} file{upstream === 1 ? '' : 's'} changed upstream
+                          </span>
+                        </Show>
+                        <Show when={r.local.length}>
+                          <span class="dimtxt">edited: {r.local.join(', ')}</span>
+                        </Show>
+                      </div>
+                    </Show>
                   </div>
                 );
               }}
             </For>
           </div>
-          <p>
+        </Show>
+
+        <div class="tools">
+          <Show when={lock().rows.length}>
             <Show when={countUpdates(lock().rows) > 0}>
               <button class="btn" disabled={!!pending()} onClick={() => void run(updateAll)}>
                 {busyText('update all', 'update all')}
-              </button>{' '}
+              </button>
             </Show>
             <button
               class="btn"
@@ -297,11 +304,52 @@ export default function Project(props: { scenario: string }) {
             >
               {busyText('sync', 'sync')}
             </button>
-            <Show when={lock().commit}>
-              {' '}
-              <span class="dimtxt">@{(lock().commit ?? '').slice(0, 7)}</span>
-            </Show>
-          </p>
+          </Show>
+          <button
+            class="linklike"
+            title="a folder that looks like a stack entry but was never imported: name it. identical files join stack.toml; differing files are listed and nothing is written"
+            aria-expanded={adoptOpen()}
+            onClick={toggleAdopt}
+          >
+            adopt…
+          </button>
+          <Show when={lock().rows.length && lock().commit}>
+            <span class="dimtxt rev" title="stack commit the lock was last synced to">@{(lock().commit ?? '').slice(0, 7)}</span>
+          </Show>
+        </div>
+        <Show when={adoptOpen()}>
+          <form
+            class="adopt"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitAdopt();
+            }}
+          >
+            <input
+              type="text"
+              ref={(el) => (adoptRef = el)}
+              value={adoptId()}
+              onInput={(e) => setAdoptId(e.currentTarget.value)}
+              placeholder="entry id, e.g. skills/file-pr"
+              aria-label="entry id to adopt"
+              size={30}
+            />
+            <input
+              type="text"
+              value={adoptTo()}
+              onInput={(e) => setAdoptTo(e.currentTarget.value)}
+              placeholder="--to dir (optional)"
+              aria-label="adopt destination"
+              size={20}
+            />
+            <button
+              type="submit"
+              class="btn"
+              disabled={!!pending() || !adoptId().trim()}
+            >
+              {busyText('adopt', 'adopt')}
+            </button>
+          </form>
         </Show>
 
         <Show when={failed()}>
@@ -316,52 +364,6 @@ export default function Project(props: { scenario: string }) {
         </Show>
         <Show when={sections()}>
           <OpResult sections={sections() as OpSection[]} label={sectionsHeading()} />
-        </Show>
-
-        <p>
-          <button
-            class="linklike"
-            title="a folder that looks like a stack entry but was never imported: name it. identical files join stack.toml; differing files are listed and nothing is written"
-            aria-expanded={adoptOpen()}
-            onClick={toggleAdopt}
-          >
-            adopt…
-          </button>
-        </p>
-        <Show when={adoptOpen()}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitAdopt();
-            }}
-          >
-            <p>
-              <input
-                type="text"
-                ref={(el) => (adoptRef = el)}
-                value={adoptId()}
-                onInput={(e) => setAdoptId(e.currentTarget.value)}
-                placeholder="entry id, e.g. skills/file-pr"
-                aria-label="entry id to adopt"
-                size={26}
-              />{' '}
-              <input
-                type="text"
-                value={adoptTo()}
-                onInput={(e) => setAdoptTo(e.currentTarget.value)}
-                placeholder="--to dir (optional)"
-                aria-label="adopt destination"
-                size={16}
-              />{' '}
-              <button
-                type="submit"
-                class="btn"
-                disabled={!!pending() || !adoptId().trim()}
-              >
-                {busyText('adopt', 'adopt')}
-              </button>
-            </p>
-          </form>
         </Show>
 
         <Presets pending={pending()} opSeq={opSeq} onApply={(name) => void run(preset(name))} />

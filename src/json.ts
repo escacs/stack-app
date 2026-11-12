@@ -344,16 +344,22 @@ export function previewFresh(requestSeq: number, opSeqNow: number): boolean {
 }
 
 /**
- * A preset row's counts against the lock: "2 imports, 1 new" ("all here"
- * when nothing is new). Once a preview has named `deps` auto-imported
- * dependencies, " +N dep" is appended so the row agrees with the preview's
- * "would import" total.
+ * A preset row's compact counts against the lock: "2 new" ("all here" when
+ * nothing is new). Once a preview has named `deps` auto-imported
+ * dependencies, " · N dep" is appended so the row agrees with the preview.
  */
 export function presetCountText(imports: PresetImport[], ids: Set<string>, deps: number): string {
   const fresh = imports.filter((i) => !ids.has(i.id)).length;
+  const base = fresh ? `${fresh} new` : 'all here';
+  return deps > 0 ? `${base} · ${deps} dep` : base;
+}
+
+/** The row counts spelled out, for the tooltip: "2 imports, 1 new, 1 dependency". */
+export function presetCountTitle(imports: PresetImport[], ids: Set<string>, deps: number): string {
+  const fresh = imports.filter((i) => !ids.has(i.id)).length;
   const n = `${imports.length} import${imports.length === 1 ? '' : 's'}`;
   const base = fresh ? `${n}, ${fresh} new` : `${n}, all here`;
-  return deps > 0 ? `${base} +${deps} dep` : base;
+  return deps > 0 ? `${base}, ${deps} ${deps === 1 ? 'dependency' : 'dependencies'} (named by the preview)` : base;
 }
 
 // ------------------------------------------------------------------ op summaries
@@ -446,42 +452,52 @@ export function describePresetApply(r: PresetApplyJson): OpSection[] {
 }
 
 /**
- * Render a preset dry-run (`preset apply <name> --dry-run --json`) as
- * display sections: what would land where, what is already imported, and —
- * first, in a bad tone — what would collide. No title ever claims a write.
+ * One line of a preset dry-run preview. `new` and `dep` would land at `path`
+ * (a `dep` was pulled in by another entry: `title` names which), `here` is
+ * already imported, `conflict` is a file that would collide, `note` is
+ * plain information. `tag` is the short dim label; `title` the long reason.
  */
-export function describePresetPreview(r: PresetApplyJson): OpSection[] {
-  const secs: OpSection[] = [];
-  const conflicts = r.conflicts ?? [];
-  if (conflicts.length) {
-    secs.push({
-      title: 'would collide (dry run, nothing written)',
-      lines: [...conflicts],
-      tone: 'bad',
+export type PreviewLine = {
+  kind: 'new' | 'dep' | 'here' | 'conflict' | 'note';
+  id: string;
+  path?: string;
+  tag?: string;
+  title?: string;
+};
+
+/**
+ * Render a preset dry-run (`preset apply <name> --dry-run --json`) as one
+ * line per entry: what would collide first, then what would land where
+ * (dependencies tagged), then what is already imported. No line ever claims
+ * a write.
+ */
+export function describePresetPreview(r: PresetApplyJson): PreviewLine[] {
+  const lines: PreviewLine[] = [];
+  for (const f of r.conflicts ?? []) {
+    lines.push({
+      kind: 'conflict',
+      id: f,
+      tag: 'exists',
+      title: 'would collide: this file already exists with other content. nothing was written',
     });
   }
-  if (r.imported.length) {
-    // Dependencies pulled in via `required by` are named so the total agrees
-    // with the preset row's counts ("2 imports, 1 new +1 dep").
-    const deps = r.imported.filter((p) => p.requiredBy).length;
-    const title = deps
-      ? `would import ${plural(r.imported.length, 'entry', 'entries')} (${plural(deps, 'dependency', 'dependencies')})`
-      : `would import ${plural(r.imported.length, 'entry', 'entries')}`;
-    secs.push({
-      title,
-      lines: r.imported.map((p) =>
-        `${p.id} → ${p.path}${p.requiredBy ? ` (required by ${p.requiredBy})` : ''}`,
-      ),
-    });
+  for (const p of r.imported) {
+    lines.push(
+      p.requiredBy
+        ? { kind: 'dep', id: p.id, path: p.path, tag: 'dep', title: `required by ${p.requiredBy}` }
+        : { kind: 'new', id: p.id, path: p.path },
+    );
   }
-  if (r.already.length) secs.push({ title: 'already here', lines: [...r.already], tone: 'dim' });
+  for (const id of r.already) {
+    lines.push({ kind: 'here', id, tag: '✓ here', title: 'already imported' });
+  }
   if (r.gitignore === 'updated') {
-    secs.push({ title: '.gitignore', lines: ['managed escacs block would update'], tone: 'dim' });
+    lines.push({ kind: 'note', id: '.gitignore', path: 'managed escacs block updates' });
   }
-  if (!secs.length) {
-    secs.push({ title: 'nothing new: everything already here', lines: [], tone: 'dim' });
+  if (!lines.length) {
+    lines.push({ kind: 'note', id: 'nothing new: everything already here' });
   }
-  return secs;
+  return lines;
 }
 
 /** Render a remove --json result as display sections. */

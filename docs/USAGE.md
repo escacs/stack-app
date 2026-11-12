@@ -352,8 +352,8 @@ sync @b51359b
 adopt…
 
 presets
-web   React starter: button plus the file-pr skill.   2 imports, all here   preview apply
-docs  Docs setup: conventions plus the agents-md scaffold.  2 imports, 1 new   preview apply
+web   React starter: button plus the file-pr skill. . . .  all here   preview apply
+docs  Docs setup: conventions plus the agents-md scaffold. . .  2 new   preview apply
 ```
 
 The stack checkout and app version lines moved to the footer `settings`
@@ -413,9 +413,13 @@ it ends.
 
 Presets are named import plans. The stack defines them in its
 `presets/*.toml` files. Each row here is one preset: its name, description,
-import counts against the lock (`N imports, M new`, or `all here`), and two
-buttons. `preview` runs a `--dry-run` apply and expands what would land
-where and what is already here, without writing anything. `apply` imports
+compact counts against the lock (`M new`, or `all here`; `· N dep` once a
+preview has named auto-imported dependencies; hover for the long form), and
+two buttons. `preview` runs a `--dry-run` apply and unfolds a tree right under
+the row: one `id → path` line per entry, dependencies tagged `(dep)` (hover
+for what requires them), entries already imported dimmed with `(✓ here)`,
+colliding files marked `!` with `(exists)`. `hide` folds it again. Nothing is
+written. `apply` imports
 all of the preset's rows, the same way `import` does. Hover `apply` to see
 what it imports.
 

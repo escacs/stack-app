@@ -18,6 +18,7 @@ import {
   parseJsonOut,
   presetApplyArgs,
   presetCountText,
+  presetCountTitle,
   presetImportsHint,
   presetListArgs,
   presetShowArgs,
@@ -511,31 +512,42 @@ describe('describePresetPreview', () => {
     gitignore: 'unchanged',
   };
 
-  it('lists what would land where and what is already imported', () => {
-    const secs = describePresetPreview(dryRun);
-    expect(secs[0].title).toBe('would import 2 entries (1 dependency)');
-    expect(secs[0].lines).toEqual([
-      'templates/react-vite-tooling → .',
-      'components/base/button → src/components/button (required by x)',
+  it('gives one line per entry: what lands where, deps tagged, what is here', () => {
+    expect(describePresetPreview(dryRun)).toEqual([
+      { kind: 'new', id: 'templates/react-vite-tooling', path: '.' },
+      {
+        kind: 'dep',
+        id: 'components/base/button',
+        path: 'src/components/button',
+        tag: 'dep',
+        title: 'required by x',
+      },
+      { kind: 'here', id: 'libraries/tailwindcss', tag: '✓ here', title: 'already imported' },
     ]);
-    expect(secs[1]).toEqual({ title: 'already here', lines: ['libraries/tailwindcss'], tone: 'dim' });
   });
 
-  it('leads with collisions in a bad tone and never claims a write', () => {
-    const secs = describePresetPreview({ ...dryRun, conflicts: ['src/x.md'] });
-    expect(secs[0].tone).toBe('bad');
-    expect(secs[0].title).toContain('would collide');
-    expect(secs[0].lines).toEqual(['src/x.md']);
-    for (const s of secs) expect(s.title).not.toMatch(/^imported /);
+  it('keeps the full reason out of the line: only the tooltip names the requirer', () => {
+    const dep = describePresetPreview(dryRun).find((l) => l.kind === 'dep');
+    expect(dep?.tag).toBe('dep');
+    expect(dep?.id).not.toContain('required by');
+    expect(dep?.title).toBe('required by x');
   });
 
-  it('names the dependency count only when a preview pulled some in', () => {
-    const direct = describePresetPreview({
-      ...dryRun,
-      imported: [{ id: 'templates/react-vite-tooling', path: '.' }],
-    });
-    expect(direct[0].title).toBe('would import 1 entry');
-    const twoDeps = describePresetPreview({
+  it('leads with collisions and never claims a write', () => {
+    const lines = describePresetPreview({ ...dryRun, conflicts: ['src/x.md', 'src/y.md'] });
+    expect(lines.slice(0, 2).map((l) => [l.kind, l.id, l.tag])).toEqual([
+      ['conflict', 'src/x.md', 'exists'],
+      ['conflict', 'src/y.md', 'exists'],
+    ]);
+    expect(lines[0].title).toContain('would collide');
+    for (const l of lines) {
+      expect(l.id).not.toMatch(/^imported /);
+      expect(`${l.tag ?? ''}${l.title ?? ''}`).not.toMatch(/\bwrote\b/);
+    }
+  });
+
+  it('marks every dependency, however many a preview pulled in', () => {
+    const lines = describePresetPreview({
       ...dryRun,
       imported: [
         { id: 'a', path: 'a' },
@@ -543,18 +555,18 @@ describe('describePresetPreview', () => {
         { id: 'c', path: 'c', requiredBy: 'a' },
       ],
     });
-    expect(twoDeps[0].title).toBe('would import 3 entries (2 dependencies)');
+    expect(lines.filter((l) => l.kind === 'dep').map((l) => l.id)).toEqual(['b', 'c']);
+    expect(lines.filter((l) => l.kind === 'new').map((l) => l.id)).toEqual(['a']);
   });
 
   it('reports the quiet case and the gitignore touch', () => {
     expect(describePresetPreview({ ...dryRun, imported: [], already: [] })).toEqual([
-      { title: 'nothing new: everything already here', lines: [], tone: 'dim' },
+      { kind: 'note', id: 'nothing new: everything already here' },
     ]);
-    const secs = describePresetPreview({ ...dryRun, gitignore: 'updated' });
-    expect(secs.at(-1)).toEqual({
-      title: '.gitignore',
-      lines: ['managed escacs block would update'],
-      tone: 'dim',
+    expect(describePresetPreview({ ...dryRun, gitignore: 'updated' }).at(-1)).toEqual({
+      kind: 'note',
+      id: '.gitignore',
+      path: 'managed escacs block updates',
     });
   });
 });
@@ -577,21 +589,41 @@ describe('presetCountText', () => {
     { id: 'components/react/button', to: 'src/components/ui' },
     { id: 'skills/file-pr', to: null },
   ];
+  const here = new Set(['skills/file-pr']);
 
-  it('counts imports and fresh rows against the lock', () => {
-    expect(presetCountText(imports, new Set(['skills/file-pr']), 0)).toBe('2 imports, 1 new');
-    expect(presetCountText(imports, new Set(), 0)).toBe('2 imports, 2 new');
+  it('counts what is new against the lock', () => {
+    expect(presetCountText(imports, here, 0)).toBe('1 new');
+    expect(presetCountText(imports, new Set(), 0)).toBe('2 new');
   });
 
   it('reads all here when nothing is new', () => {
     expect(
       presetCountText(imports, new Set(['components/react/button', 'skills/file-pr']), 0),
-    ).toBe('2 imports, all here');
+    ).toBe('all here');
   });
 
   it('appends the preview-named dependencies so the row matches the preview', () => {
-    expect(presetCountText(imports, new Set(['skills/file-pr']), 1)).toBe('2 imports, 1 new +1 dep');
-    expect(presetCountText(imports, new Set(['skills/file-pr']), 2)).toBe('2 imports, 1 new +2 dep');
+    expect(presetCountText(imports, here, 1)).toBe('1 new · 1 dep');
+    expect(presetCountText(imports, here, 2)).toBe('1 new · 2 dep');
+  });
+});
+
+describe('presetCountTitle', () => {
+  const imports = [
+    { id: 'components/react/button', to: 'src/components/ui' },
+    { id: 'skills/file-pr', to: null },
+  ];
+  const here = new Set(['skills/file-pr']);
+
+  it('spells the counts out for the tooltip', () => {
+    expect(presetCountTitle(imports, here, 0)).toBe('2 imports, 1 new');
+    expect(presetCountTitle(imports.slice(0, 1), new Set(), 0)).toBe('1 import, 1 new');
+    expect(presetCountTitle(imports, new Set(['components/react/button', 'skills/file-pr']), 0)).toBe('2 imports, all here');
+  });
+
+  it('names dependencies once a preview has', () => {
+    expect(presetCountTitle(imports, here, 1)).toContain('1 dependency');
+    expect(presetCountTitle(imports, here, 2)).toContain('2 dependencies');
   });
 });
 
