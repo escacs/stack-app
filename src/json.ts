@@ -87,6 +87,17 @@ export type ImportJson = {
   gitignore: 'updated' | 'unchanged';
 };
 
+/** `import --dry-run --json`: the plan plus its collisions; writes nothing. */
+export type ImportDryRunJson = {
+  command: 'import';
+  dryRun: boolean;
+  commit: string;
+  imported: { id: string; path: string; requiredBy?: string }[];
+  already: string[];
+  conflicts: string[];
+  gitignore: 'updated' | 'unchanged';
+};
+
 export type SyncJson = {
   command: 'sync';
   restored: string[];

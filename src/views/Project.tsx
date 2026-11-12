@@ -5,8 +5,17 @@
 // the rows never lag what the CLI last did. Update merges or leaves
 // <<<<<<< markers, remove keeps edited files, sync only restores missing
 // files, adopt never overwrites.
-import { For, Show, createEffect, createSignal, on, onMount } from 'solid-js';
-import { errText, stackRun, type StackOut } from '../bridge';
+import { For, Show, createEffect, createMemo, createSignal, on, onMount, untrack } from 'solid-js';
+import { errText, projectFolders, stackRun, type StackOut } from '../bridge';
+import {
+  adoptArgs,
+  adoptCountText,
+  adoptDryRunArgs,
+  conflictsFor,
+  matchAdoptCandidates,
+  type AdoptCandidate,
+} from '../adopt';
+import { catalogs, sourceKey, type CatalogData } from '../browseData';
 import {
   describeImport,
   describeInit,
@@ -18,8 +27,11 @@ import {
   importArgs,
   presetApplyArgs,
   refusalFiles,
+  type ImportDryRunJson,
   type ImportJson,
   type InitJson,
+  type JsonEntry,
+  type ListJson,
   type OpSection,
   type PresetApplyJson,
   type RemoveJson,
@@ -55,10 +67,18 @@ export default function Project(props: { scenario: string }) {
   // after the bump names pre-op lock state and must be dropped, not shown.
   const [opSeq, setOpSeq] = createSignal(0);
   const [lookalikes, setLookalikes] = createSignal<string[]>([]);
-  const [adoptOpen, setAdoptOpen] = createSignal(false);
-  const [adoptId, setAdoptId] = createSignal('');
-  const [adoptTo, setAdoptTo] = createSignal('');
-  let adoptRef: HTMLInputElement | undefined;
+  const [otherOpen, setOtherOpen] = createSignal(false);
+  const [otherId, setOtherId] = createSignal('');
+  const [otherTo, setOtherTo] = createSignal('');
+  let otherRef: HTMLInputElement | undefined;
+  // Adopt suggestions: the catalog plus the project's folders, matched by
+  // name (see adopt.ts). Hints arrive later, one dry run per candidate.
+  const [entries, setEntries] = createSignal<JsonEntry[]>([]);
+  const [folders, setFolders] = createSignal<string[]>([]);
+  const [hints, setHints] = createSignal<Record<string, 'identical' | 'differs'>>({});
+  let adoptGen = 0;
+  let hintGen = 0;
+  let hintedKey = '';
 
   onMount(() => void refreshLock());
 
@@ -68,13 +88,114 @@ export default function Project(props: { scenario: string }) {
       () => config()?.project ?? null,
       () => {
         clearOutput();
-        setAdoptOpen(false);
-        setAdoptId('');
-        setAdoptTo('');
+        setOtherOpen(false);
+        setOtherId('');
+        setOtherTo('');
+        setEntries([]);
+        setFolders([]);
+        setHints({});
+        hintedKey = '';
       },
       { defer: true },
     ),
   );
+
+  const candidates = createMemo((): AdoptCandidate[] => {
+    const ids = new Set(lock().rows.map((r) => r.id));
+    return matchAdoptCandidates(folders(), entries(), ids);
+  });
+  const candidatesKey = createMemo(() =>
+    candidates()
+      .map((c) => `${c.folder}|${c.id}|${c.to ?? ''}`)
+      .join('\n'),
+  );
+  // Manual-form autocomplete: committed entries this project never imported.
+  const suggestIds = createMemo(() => {
+    const ids = new Set(lock().rows.map((r) => r.id));
+    return entries()
+      .filter((e) => e.committed && !ids.has(e.id))
+      .map((e) => e.id);
+  });
+
+  // Stale-while-revalidate catalog (shared with Browse through `catalogs`)
+  // plus a fresh folder listing; a failure just means no suggestions.
+  async function loadAdopt(): Promise<void> {
+    const c = config();
+    const proj = c?.project ?? null;
+    if (!proj) return;
+    const key = sourceKey(c);
+    const gen = ++adoptGen;
+    const cached = catalogs.get(key);
+    setEntries(cached?.entries ?? []);
+    setFolders([]);
+    setHints({});
+    hintedKey = '';
+    const foldersP = projectFolders(proj).then(
+      (r) => r.folders,
+      () => [] as string[],
+    );
+    const listP = stackRun('list', ['--json'], proj, c?.stackPath).then(
+      (out) => out,
+      () => null,
+    );
+    const [found, out] = await Promise.all([foldersP, listP]);
+    if (gen !== adoptGen) return;
+    setFolders(found);
+    if (out && !(cached && cached.raw === out.stdout)) {
+      try {
+        const data = fromStackOut<ListJson>(out);
+        const next: CatalogData = {
+          raw: out.stdout,
+          entries: data.entries,
+          uncommitted: new Set<string>(data.uncommitted ?? []),
+        };
+        catalogs.set(key, next);
+        setEntries(next.entries);
+      } catch {
+        // Keep the cached (or empty) catalog: the page works without hints.
+      }
+    }
+  }
+
+  // One dry run per candidate: collisions under its destination mean its
+  // files differ, none mean they match the stack entry. Skipped while an op
+  // runs; the lock refresh after it re-triggers this through candidatesKey.
+  async function loadHints(key: string, busy: string | null): Promise<void> {
+    if (busy || !key || key === hintedKey) return;
+    const gen = ++hintGen;
+    const c = config();
+    if (!c?.project) return;
+    const proj = c.project;
+    const stackPath = c.stackPath;
+    const found: Record<string, 'identical' | 'differs'> = {};
+    await Promise.all(
+      candidates().map(async (cand) => {
+        try {
+          const out = await stackRun('import', adoptDryRunArgs(cand), proj, stackPath);
+          const data = fromStackOut<ImportDryRunJson>(out);
+          const mine = conflictsFor(data.conflicts ?? [], cand.to ?? cand.folder);
+          found[cand.id] = mine.length ? 'differs' : 'identical';
+        } catch {
+          // No hint for this one; the adopt button still works.
+        }
+      }),
+    );
+    if (gen !== hintGen) return;
+    hintedKey = key;
+    setHints(found);
+  }
+
+  // Suggestions load for this source; a project or stack switch reloads.
+  createEffect(() => {
+    sourceKey(config());
+    untrack(() => void loadAdopt());
+  });
+
+  createEffect(() => {
+    const key = candidatesKey();
+    const busy = pending();
+    untrack(() => void loadHints(key, busy));
+  });
 
   function clearOutput() {
     setSections(null);
@@ -173,14 +294,14 @@ export default function Project(props: { scenario: string }) {
     describe: decode<PresetApplyJson>(describePresetApply),
   });
 
-  function toggleAdopt() {
-    const open = !adoptOpen();
-    setAdoptOpen(open);
-    if (open) queueMicrotask(() => adoptRef?.focus());
+  function toggleOther() {
+    const open = !otherOpen();
+    setOtherOpen(open);
+    if (open) queueMicrotask(() => otherRef?.focus());
   }
 
-  function submitAdopt() {
-    const id = adoptId().trim();
+  function submitOther() {
+    const id = otherId().trim();
     if (!id || pending()) return;
     // On success the form closes cleared, leaving the shared output above;
     // on failure it stays open so the id can be fixed and retried.
@@ -188,14 +309,27 @@ export default function Project(props: { scenario: string }) {
       key: 'adopt',
       label: `adopt ${id}`,
       sub: 'import',
-      args: importArgs(id, adoptTo()),
+      args: importArgs(id, otherTo()),
       describe: decode<ImportJson>(describeImport),
     }).then((ok) => {
       if (ok) {
-        setAdoptId('');
-        setAdoptTo('');
-        setAdoptOpen(false);
+        setOtherId('');
+        setOtherTo('');
+        setOtherOpen(false);
       }
+    });
+  }
+
+  function adoptCandidate(c: AdoptCandidate) {
+    if (pending()) return;
+    // The destination is implied by the folder; a differing candidate shows
+    // the same look-alike refusal as a manual adopt.
+    void run({
+      key: `adopt ${c.id}`,
+      label: `adopt ${c.id}`,
+      sub: 'import',
+      args: adoptArgs(c),
+      describe: decode<ImportJson>(describeImport),
     });
   }
 
@@ -229,6 +363,93 @@ export default function Project(props: { scenario: string }) {
             </button>
           </div>
         </Show>
+        {/*
+          Adopt sits next to the set-up slot: both are about things not in
+          stack.toml yet. With candidates, one line each with its adopt
+          button; with none, only the quiet other… link for the manual case.
+        */}
+        <div class="adopt-block">
+          <Show when={candidates().length}>
+            <p
+              class="dimtxt found"
+              title="these folders look like stack entries that were never imported: adopting records identical files in stack.toml, and lists differing files without writing anything"
+            >
+              found in project: {adoptCountText(candidates().length)}
+            </p>
+            <div class="adopt-list">
+              <For each={candidates()}>
+                {(c) => (
+                  <div class="adopt-row">
+                    <span title={c.to ? `adopts into ${c.to}` : 'adopts into its default place'}>
+                      {c.folder} → {c.id}
+                    </span>
+                    <Show when={hints()[c.id]}>
+                      <span class="dimtxt">({hints()[c.id]})</span>
+                    </Show>
+                    <button
+                      class="btn"
+                      title={
+                        hints()[c.id] === 'differs'
+                          ? 'the files differ, so this lists them and writes nothing'
+                          : 'records these files in stack.toml without changing them'
+                      }
+                      disabled={!!pending()}
+                      onClick={() => adoptCandidate(c)}
+                    >
+                      {busyText(`adopt ${c.id}`, 'adopt')}
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+          <button
+            class="linklike"
+            title="adopt a folder the list missed: name the entry and the folder by hand"
+            aria-expanded={otherOpen()}
+            onClick={toggleOther}
+          >
+            other…
+          </button>
+          <Show when={otherOpen()}>
+            <form
+              class="adopt"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitOther();
+              }}
+            >
+              <input
+                type="text"
+                ref={(el) => (otherRef = el)}
+                value={otherId()}
+                onInput={(e) => setOtherId(e.currentTarget.value)}
+                placeholder="entry id, e.g. skills/file-pr"
+                aria-label="entry id to adopt"
+                list="adopt-id-list"
+                size={30}
+              />
+              <datalist id="adopt-id-list">
+                <For each={suggestIds()}>{(id) => <option value={id} />}</For>
+              </datalist>
+              <input
+                type="text"
+                value={otherTo()}
+                onInput={(e) => setOtherTo(e.currentTarget.value)}
+                placeholder="folder in this project (optional)"
+                aria-label="folder in this project"
+                size={30}
+              />
+              <button
+                type="submit"
+                class="btn"
+                disabled={!!pending() || !otherId().trim()}
+              >
+                {busyText('adopt', 'adopt')}
+              </button>
+            </form>
+          </Show>
+        </div>
         <Show when={lock().rows.length} fallback={<Show when={!lockError() && !needsInit()}><Empty>(._.) nothing imported</Empty></Show>}>
           <h2>imports</h2>
           <div class="rows">
@@ -305,52 +526,10 @@ export default function Project(props: { scenario: string }) {
               {busyText('sync', 'sync')}
             </button>
           </Show>
-          <button
-            class="linklike"
-            title="a folder that looks like a stack entry but was never imported: name it. identical files join stack.toml; differing files are listed and nothing is written"
-            aria-expanded={adoptOpen()}
-            onClick={toggleAdopt}
-          >
-            adopt…
-          </button>
           <Show when={lock().rows.length && lock().commit}>
             <span class="dimtxt rev" title="stack commit the lock was last synced to">@{(lock().commit ?? '').slice(0, 7)}</span>
           </Show>
         </div>
-        <Show when={adoptOpen()}>
-          <form
-            class="adopt"
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitAdopt();
-            }}
-          >
-            <input
-              type="text"
-              ref={(el) => (adoptRef = el)}
-              value={adoptId()}
-              onInput={(e) => setAdoptId(e.currentTarget.value)}
-              placeholder="entry id, e.g. skills/file-pr"
-              aria-label="entry id to adopt"
-              size={30}
-            />
-            <input
-              type="text"
-              value={adoptTo()}
-              onInput={(e) => setAdoptTo(e.currentTarget.value)}
-              placeholder="--to dir (optional)"
-              aria-label="adopt destination"
-              size={20}
-            />
-            <button
-              type="submit"
-              class="btn"
-              disabled={!!pending() || !adoptId().trim()}
-            >
-              {busyText('adopt', 'adopt')}
-            </button>
-          </form>
-        </Show>
 
         <Show when={failed()}>
           <h2>{logLabel()}</h2>

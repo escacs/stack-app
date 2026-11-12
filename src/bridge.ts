@@ -23,6 +23,9 @@ export type ProjectReport = {
   errors: string[];
 };
 
+/** Project-relative folders that could be unimported stack entries. */
+export type ProjectFolders = { folders: string[] };
+
 export type NodeStatus = {
   ok: boolean;
   version: string | null;
@@ -63,6 +66,10 @@ export const addRecentProject = (path: string): Promise<AppConfig> =>
 
 export const validateProject = (path: string): Promise<ProjectReport> =>
   invoke('validate_project', { path });
+
+/** Folders that could be stack entries imported by hand (adopt suggestions). */
+export const projectFolders = (path: string): Promise<ProjectFolders> =>
+  invoke('project_folders', { path });
 
 export const nodeStatus = (): Promise<NodeStatus> => invoke('node_status');
 

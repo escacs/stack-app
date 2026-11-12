@@ -39,6 +39,8 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(180);
 /// escacs block. All three take no positional args and no flags (`--project`
 /// is always set by Rust). `preset` takes an action positional (`list`,
 /// `show <name>` or `apply <name>`); only `apply` accepts `--dry-run`.
+/// `import` also accepts `--dry-run`: the project page dry-runs each
+/// adoptable folder to learn whether its files are identical or differ.
 const ALLOW_SUBCOMMANDS: &[&str] = &[
     "list",
     "search",
@@ -138,8 +140,8 @@ impl BuiltArgv {
 /// Accepts `--json` (boolean, passed through to the CLI), `--offline`
 /// (boolean, read-only list/search/show/status: skips the remote-cache
 /// network sync, ~1s on status), `--dry-run`
-/// (boolean, `preset apply` only) and `--` (separator: everything after it
-/// is positional, never a flag).
+/// (boolean, `import` and `preset apply` only: both write nothing) and `--`
+/// (separator: everything after it is positional, never a flag).
 fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, String> {
     let mut positionals: Vec<&str> = Vec::new();
     let mut kind: Option<&str> = None;
@@ -201,8 +203,8 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
         }
         i += 1;
     }
-    if dryrun && sub != "preset" {
-        return Err("--dry-run is only supported by preset apply".to_string());
+    if dryrun && !matches!(sub, "preset" | "import") {
+        return Err("--dry-run is only supported by import and preset apply".to_string());
     }
     if offline && !matches!(sub, "list" | "search" | "show" | "status") {
         return Err("--offline is only supported by list, search, show and status".to_string());
@@ -309,7 +311,7 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                 return Err("--to works with a single entry only".to_string());
             }
             Ok(BuiltArgv::new(
-                flag_vec(false, true, true, false, false)?,
+                flag_vec(false, true, true, false, true)?,
                 pos(),
             ))
         }
@@ -1403,9 +1405,13 @@ mod tests {
         assert_eq!(argv.positionals, vec!["apply", "web"]);
         assert!(build_argv("preset", &args(&["list", "--dry-run"]), &p).is_err());
         assert!(build_argv("preset", &args(&["show", "web", "--dry-run"]), &p).is_err());
-        // No other subcommand accepts --dry-run; preset takes no valued flags.
+        // import also accepts --dry-run (the project page's adopt hints);
+        // no other subcommand does. Preset takes no valued flags.
         assert!(build_argv("list", &args(&["--dry-run"]), &p).is_err());
-        assert!(build_argv("import", &args(&["a", "--dry-run"]), &p).is_err());
+        assert!(build_argv("update", &args(&["--dry-run"]), &p).is_err());
+        let argv = build_argv("import", &args(&["skills/a", "--dry-run", "--json"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--dry-run", "--json"]);
+        assert_eq!(argv.positionals, vec!["skills/a"]);
         assert!(build_argv("preset", &args(&["list", "--kind", "skill"]), &p).is_err());
         assert!(build_argv("preset", &args(&["apply", "web", "--to", "x"]), &p).is_err());
         assert!(build_argv("preset", &args(&["apply", "web", "--ref", "v1"]), &p).is_err());

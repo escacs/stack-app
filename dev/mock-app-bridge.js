@@ -9,8 +9,9 @@
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
-// imports), manyfresh (15 presets, no stack.toml), lots (36 presets). A
-// `+update-available` or `+update-error` suffix on any scenario drives the
+// imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
+// adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs).
+// A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
 // the latter fails checks.
@@ -409,6 +410,45 @@
         'skills/file-pr': ['.agents/skills/file-pr/SKILL.md', '.agents/skills/file-pr/helpers.mjs'],
       },
     }),
+    // Adopt suggestions: folders that look like entries but were never
+    // imported. adopt0 has only a non-matching folder (nothing to adopt),
+    // adopt1 one identical folder, adopt3 three — ponytail with differing
+    // files, for the refusal. adopt1 and adopt3 have no stack.toml, so the
+    // init button sits next to the suggestions.
+    adopt0: () => ({ ...SCENARIOS.populated(), folders: ['.agents/skills/my-own-thing'] }),
+    adopt1: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({ path, valid: true, markers: ['.agents/skills', '.git'], errors: [] }),
+      lock: [],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      folders: ['.agents/skills/ponytail'],
+      fresh: true,
+    }),
+    adopt3: () => ({
+      config: { ...baseConfig, recentProjects: ['/home/dev/projects/folio'], project: '/home/dev/projects/folio' },
+      node: { ok: true, version: 'v22.14.0', major: 22, error: null },
+      stack: structuredClone(okStack),
+      report: (path) => ({ path, valid: true, markers: ['.agents/skills', '.git'], errors: [] }),
+      lock: [],
+      uncommitted: [],
+      noWorkers: false,
+      scan: [],
+      pick: '/home/dev/projects/folio',
+      folders: [
+        '.agents/skills/file-pr',
+        '.agents/skills/ponytail',
+        '.stack/systems/engineering-conventions',
+      ],
+      lookalikeFor: {
+        'skills/ponytail': ['.agents/skills/ponytail/SKILL.md'],
+      },
+      fresh: true,
+    }),
     scan: () => ({
       config: {
         ...baseConfig,
@@ -596,6 +636,33 @@
         const log = [];
         const imported = [];
         const already = [];
+        // A dry run plans without writing: look-alike collisions are
+        // reported in `conflicts`, not thrown. The project page uses it to
+        // learn whether an adoptable folder is identical or differs.
+        if (dryRun) {
+          const conflicts = [];
+          for (const id of ids) {
+            const e = visible.find((x) => x.id === id);
+            if (!e || e.committed === false) {
+              return errOut(`${id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
+            }
+            if (fx.lock.some((r) => r.id === id)) {
+              already.push(id);
+              continue;
+            }
+            const clash = !to && fx.lookalikeFor?.[id];
+            if (clash) conflicts.push(...clash);
+            imported.push({ id, path: to || destFor(id) });
+          }
+          if (!json) {
+            return okOut([
+              ...imported.map((p) => `import  ${p.id} -> ${p.path}`),
+              ...conflicts.map((c) => `CONFLICT ${c} (exists with other content; a real import would abort)`),
+              'dry run: nothing written',
+            ].join('\n'));
+          }
+          return jsonOut({ command: 'import', dryRun: true, commit: FULL, imported, already, conflicts, gitignore: 'unchanged' });
+        }
         for (const id of ids) {
           const e = visible.find((x) => x.id === id);
           if (!e || e.committed === false) {
@@ -864,6 +931,7 @@
       return structuredClone(fx.config);
     },
     validate_project: async ({ path }) => fx.report(path),
+    project_folders: async () => ({ folders: [...(fx.folders ?? [])] }),
     node_status: async () => ({ ...fx.node }),
     // Release version the footer shows (mirrors tauri.conf in the real app).
     'plugin:app|version': async () => '0.1.0',

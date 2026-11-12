@@ -346,13 +346,15 @@ imported from the stack, and presets. It needs a project. The old
 ```
 [init stack.toml]                         ← only without stack.toml
 
+found in project: 1 look-alike entry     ← only when folders look like entries
+.agents/skills/ponytail → skills/ponytail (identical)  adopt
+other…
+
 imported  skills/file-pr        @b51359b → .agents/skills/file-pr        remove
 imported  styles/folio-light    @b51359b → .agents/skills/folio-light    remove
 imported  workers/mel           @b51359b → .stack/workers/mel            remove
 
 sync @b51359b
-
-adopt…
 
 presets 2
 web   React starter: button plus the file-pr skill. . . .  all here   preview apply
@@ -399,13 +401,18 @@ A deleted file counts as edited; `sync` restores it.
 | `remove` | every row | deletes the import's unedited files and its entry in `stack.toml` | does not delete edited files; they are listed as `kept (edited here)` |
 | `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
 | `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
-| `adopt…` | always | a form for an entry id, such as `skills/file-pr`, and an optional `--to`. It runs the same import as Browse | differing files are listed and nothing is written |
+| `adopt` (one button per found folder) | a project folder looks like an entry that was never imported | records the folder's files in `stack.toml`: the same import as Browse, with the destination implied | differing files are listed and nothing is written |
+| `other…` | always | the manual fallback: an entry id (autocompleted from the catalog) plus an optional folder in this project | differing files are listed and nothing is written |
 | preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
 | preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
 
-Use `adopt…` for a folder that holds an entry's files but was never
-imported. Identical files join the record. If any file differs, the app
-lists it and writes nothing.
+Next to the set-up slot, `found in project: N look-alike entries` lists
+folders that look like stack entries but were never imported: a skills
+folder, a `.stack/<id>` folder, or a hand-placed component. Each line names
+the folder and the entry it matches, with `(identical)` when its files
+already match the entry or `(differs)` when any file differs, and one
+`adopt` button that records it. `other…` covers the rare folder the list
+misses: an entry id plus an optional folder in this project.
 
 Each action shows its result under the rows, as titled sections. A failed
 action shows the CLI's error text as it is. Only one action runs at a time;
@@ -511,13 +518,15 @@ Every view decodes the CLI's `--json` output:
 | browse: entry | `show <id>`, and `show <id> --file <path>` for file bodies |
 | project rows | `status` |
 | presets | `preset list`; `preset apply <name>`; preview runs `preset apply <name> --dry-run` |
-| import, adopt | `import` |
+| import, adopt, `other…` | `import`; each adopt hint is one `import --dry-run` |
 | update, update all | `update` |
 | remove, sync, init | `remove`, `sync`, `init` |
 
 The app adds `--offline` to `show` and `status`, which never need the
-network. `list` stays online. A failed command shows its error text: the
-CLI's stderr, or its stdout if stderr is empty.
+network. `list` stays online. Adopt suggestions match a shell-side folder
+listing (the skills dirs, `src/components`, `.stack`) against the catalog
+by name. A failed command shows its error text: the CLI's stderr, or its
+stdout if stderr is empty.
 
 ## 7. Troubleshooting
 
@@ -568,6 +577,9 @@ opens the project page, as an alias.
 | `many` | project page with three imports and 15 presets: the presets start collapsed |
 | `manyfresh` | plain folder with 15 presets: the set-up slot, presets open |
 | `lots` | three imports and 34 presets |
+| `adopt0` | project page with no adoptable folders: only the quiet `other…` link |
+| `adopt1` | one adoptable folder next to `init stack.toml` |
+| `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
 | `bad-stack` | the stack checkout setup screen |
 | `no-node` | the setup screen with node missing |
 

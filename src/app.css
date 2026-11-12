@@ -135,9 +135,16 @@ input[type="text"]::placeholder { color: var(--ghost); }
 
 /* the set-up slot: just its button, on the 24px line */
 .project .setup { line-height: 24px; }
-.project .setup + .tools { margin-top: 0; }
 
-/* sync, adopt, stack rev: one quiet line under the imports */
+/* adopt suggestions: next to the set-up slot, one line per folder, then the
+   quiet other… link (the only thing shown with no candidates) */
+.project .adopt-block { line-height: 24px; }
+.project .setup + .adopt-block { margin-top: 12px; }
+.project .adopt-block .found { margin: 0; }
+.project .adopt-list { margin: 0 0 4px; }
+.project .adopt-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2ch; }
+
+/* sync, stack rev: one quiet line under the imports */
 .project .tools { display: flex; align-items: baseline; gap: 0 2ch; margin-top: 12px; }
 .project .tools .rev { margin-left: auto; }
 .project .adopt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2ch; margin-top: 4px; }

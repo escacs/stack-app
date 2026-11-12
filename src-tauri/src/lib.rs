@@ -81,6 +81,7 @@ pub fn run() {
             config::save_config,
             config::add_recent_project,
             project::validate_project,
+            project::project_folders,
             scan::scan_projects,
             scan::default_scan_roots,
             stack::node_status,
