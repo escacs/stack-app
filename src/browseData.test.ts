@@ -10,6 +10,8 @@ import {
   createFetchCache,
   createLimiter,
   crumbParts,
+  dragPassed,
+  mayMoveFocusToImport,
   notImportedIds,
   previewKey,
   rangeIds,
@@ -323,5 +325,33 @@ describe('createFetchCache', () => {
     expect(await joiner).toBe('retried');
     expect(runs).toBe(1);
     expect(await busy).toBe('a');
+  });
+});
+
+describe('dragPassed', () => {
+  it('ignores a stationary cursor (the bar-shift synthetic enter), accepts a real drag', () => {
+    expect(dragPassed(100, 200, 100, 200)).toBe(false);
+    expect(dragPassed(100, 200, 102, 203)).toBe(false);
+    expect(dragPassed(100, 200, 100, 205)).toBe(true);
+    expect(dragPassed(100, 200, 100, 220)).toBe(true);
+  });
+});
+
+describe('mayMoveFocusToImport', () => {
+  it('holds focus while typing in any text field', () => {
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'text' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'search' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'TEXTAREA' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'SELECT' })).toBe(false);
+    expect(mayMoveFocusToImport({ tagName: 'DIV', isContentEditable: true })).toBe(false);
+  });
+
+  it('moves focus from body, list rows and buttons', () => {
+    expect(mayMoveFocusToImport(null)).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'BODY' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'A' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'BUTTON' })).toBe(true);
+    expect(mayMoveFocusToImport({ tagName: 'INPUT', type: 'checkbox' })).toBe(true);
   });
 });

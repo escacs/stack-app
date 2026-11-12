@@ -270,3 +270,47 @@ export function applyRange(prev: Set<string>, range: string[], additive: boolean
 export function notImportedIds(entries: Pick<JsonEntry, 'id'>[], imported: Set<string>): string[] {
   return entries.filter((e) => !imported.has(e.id)).map((e) => e.id);
 }
+
+/**
+ * Minimum pointer travel (px) before a gutter hover extends the selection.
+ * Clicking a gutter opens the selection bar above the list, which shifts
+ * every row under the stationary cursor: without a threshold the synthetic
+ * enter on a neighbouring gutter drag-extends, and one click selects three
+ * rows. Rows are a full line tall, so 5px never blocks a real drag.
+ */
+export const GUTTER_DRAG_PX = 5;
+
+/** True once the pointer moved at least the drag threshold from its press point. */
+export function dragPassed(x0: number, y0: number, x1: number, y1: number, px: number = GUTTER_DRAG_PX): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  return dx * dx + dy * dy >= px * px;
+}
+
+/** The focused-element facts the confirm focus rule needs (structural, so unit-testable). */
+export type FocusCandidate = {
+  tagName: string;
+  type?: string;
+  isContentEditable?: boolean;
+};
+
+/**
+ * Whether the batch confirm may move focus to [import] once actionable.
+ * Never while the user is typing in a text field (search, an inline `to:`
+ * ask, the confirm's own base field): stealing focus mid-typing drops
+ * keystrokes. Body, list rows and buttons stay fair game, so keyboard
+ * users still land on the actionable button.
+ */
+export function mayMoveFocusToImport(active: FocusCandidate | null): boolean {
+  if (!active) return true;
+  if (active.isContentEditable) return false;
+  const tag = active.tagName.toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return false;
+  if (tag === 'INPUT') {
+    // Button-like inputs take no text; every other type (text, search, …) does.
+    return ['BUTTON', 'SUBMIT', 'RESET', 'CHECKBOX', 'RADIO', 'FILE', 'RANGE', 'COLOR', 'HIDDEN', 'IMAGE'].includes(
+      (active.type ?? 'text').toUpperCase(),
+    );
+  }
+  return true;
+}
