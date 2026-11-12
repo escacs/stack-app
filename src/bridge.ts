@@ -73,6 +73,14 @@ export type CliStatus = {
 
 export const pickFolder = (): Promise<string | null> => invoke('pick_folder');
 
+/**
+ * Adopt picker: native dialog starting in the project, confined to it. The
+ * shell returns the project-relative folder, null on cancel, or a short
+ * rejection (outside the project, not a folder).
+ */
+export const pickAdoptFolder = (projectDir: string): Promise<string | null> =>
+  invoke('pick_adopt_folder', { projectDir });
+
 export const getConfig = (): Promise<AppConfig> => invoke('get_config');
 
 export const saveConfig = (config: AppConfig): Promise<null> =>

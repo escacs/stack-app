@@ -16,7 +16,9 @@
 // A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
-// the latter fails checks.
+// the latter fails checks. A `+pick-<case>` suffix scripts the adopt folder
+// picker: matching, differing, nomatch, multi, outside, cancel
+// (e.g. `#adopt3+pick-differing,/project`).
 (() => {
   'use strict';
 
@@ -30,6 +32,13 @@
       ? 'error'
       : 'none';
   const UPDATE_VERSION = '0.1.9';
+  // Adopt-picker fixture: `+pick-<case>` scripts what the native folder
+  // dialog returns (the real shell returns a project-relative folder, null
+  // on cancel, or rejects outside picks). Cases: matching (identical),
+  // differing, nomatch, multi (two same-named entries), outside (rejects),
+  // cancel. Without a flag the first adoptable folder answers, else a
+  // non-matching folder.
+  const pickFlag = (flags.find((f) => f.startsWith('pick-')) ?? '').slice('pick-'.length) || null;
 
   // ---------------------------------------------------------------- catalog
   // Rendered into the exact JSON shapes of tools/stack/cli.mjs --json (and
@@ -678,6 +687,11 @@
       return errOut('--dry-run is only supported by import and preset apply');
     }
     const visible = CATALOG.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
+    // The pick-multi fixture needs two same-named entries; the default
+    // catalog keeps unique names, so the twin only exists under the flag.
+    if (pickFlag === 'multi') {
+      visible.push({ id: 'components/legacy/button', usage: 'copy', status: 'experimental', summary: 'Legacy button that shares its name with the react one.', library: { name: 'legacy', extends: null, default: false } });
+    }
     switch (sub) {
       case 'list': {
         const rows = visible.filter((e) => kindMatch(e, positional[0]));
@@ -1032,6 +1046,21 @@
     },
     'plugin:event|unlisten': async () => null,
     pick_folder: async () => fx.pick,
+    // Adopt picker: project-relative like the real shell. matching is an
+    // identical entry no scenario has imported; differing refuses in adopt3
+    // (its lookalike); multi names two same-named components; outside
+    // rejects the way Rust confinement does.
+    pick_adopt_folder: async () => {
+      switch (pickFlag) {
+        case 'matching': return '.stack/systems/engineering-conventions';
+        case 'differing': return '.agents/skills/ponytail';
+        case 'nomatch': return 'vendor/my-own-thing';
+        case 'multi': return 'handmade/button';
+        case 'outside': throw 'folder is outside this project';
+        case 'cancel': return null;
+        default: return (fx.folders ?? [])[0] ?? 'vendor/my-own-thing';
+      }
+    },
     get_config: async () => structuredClone(fx.config),
     save_config: async ({ config }) => {
       fx.config = structuredClone(config);

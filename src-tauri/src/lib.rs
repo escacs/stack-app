@@ -42,6 +42,37 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     .map_err(|e| format!("folder picker failed: {e}"))
 }
 
+/// Adopt picker: the same native dialog, starting in the open project. The
+/// choice is confined like every other project path (see `paths`): outside
+/// picks and symlink escapes are rejected with a short message. Returns the
+/// project-relative posix path, or `None` on cancel.
+#[tauri::command]
+async fn pick_adopt_folder(
+    app: tauri::AppHandle,
+    project_dir: String,
+) -> Result<Option<String>, String> {
+    let start = paths::canonical_dir(std::path::Path::new(&project_dir), "resolve project dir")?;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_directory(start)
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| format!("folder picker failed: {e}"))?;
+    match picked {
+        None => Ok(None),
+        Some(p) => {
+            let rel = paths::relative_inside(
+                std::path::Path::new(&project_dir),
+                std::path::Path::new(&p),
+            )?;
+            Ok(Some(rel))
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -79,6 +110,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             pick_folder,
+            pick_adopt_folder,
             config::get_config,
             config::save_config,
             config::add_recent_project,
