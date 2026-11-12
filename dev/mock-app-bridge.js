@@ -9,7 +9,7 @@
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
 // scan, noworker, noproject, bad-stack, fresh, no-auth, no-cli,
-// cli-foreign, no-path.
+// cli-foreign, cli-elsewhere, no-path.
 (() => {
   'use strict';
 
@@ -422,7 +422,7 @@
         path: '', valid: false, source: 'missing',
         git: false, cli: false,
         node: { ok: true, version: 'v22.14.0', major: 22, error: null },
-        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone in settings (the folder containing tools/stack/cli.mjs).',
+        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Press get stack, or pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK.',
       },
       report: (path) => ({ path, valid: true, markers: [], errors: [] }),
       lock: [],
@@ -452,6 +452,13 @@
     'cli-foreign': () => {
       const f = SCENARIOS.populated();
       f.cli = { status: 'foreign-file', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: null, onPath: true, message: '~/.local/bin/stack exists and is not a symlink; leaving it alone.' };
+      return f;
+    },
+    // Valid stack, the link points at another stack's shim: the quiet
+    // line explains, with no offer (linking refuses to repoint it).
+    'cli-elsewhere': () => {
+      const f = SCENARIOS.populated();
+      f.cli = { status: 'points-elsewhere', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: '~/other-stack/bin/stack', onPath: true, message: '~/.local/bin/stack points at ~/other-stack/bin/stack, not at the stack shim; leaving it alone.' };
       return f;
     },
     // Valid stack, linked, but the bin dir is off PATH: the quiet line

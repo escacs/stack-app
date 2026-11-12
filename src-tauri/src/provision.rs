@@ -212,7 +212,7 @@ pub(crate) fn provision_with(inputs: &ProvisionInputs, exec: &dyn ProvisionExec)
     // 4. Fallback: the app's first-run folder picker.
     if dest_taken(&dest) {
         ProvisionReport::manual(format!(
-            "{} exists but is not a usable stack checkout (needs .git/HEAD and tools/stack/cli.mjs); leaving it alone.",
+            "{} exists but is not a usable stack checkout (needs .git/HEAD and tools/stack/cli.mjs); leaving it alone. Remove it and retry get stack.",
             tilde(home, &dest)
         ))
     } else {
@@ -367,9 +367,27 @@ pub(crate) fn bin_on_path(path_var: &std::ffi::OsStr, bin_dir: &Path) -> bool {
     false
 }
 
+/// Lexically normalize a path (resolve `.` and `..`) without touching the
+/// filesystem, so a dangling relative link still compares correctly.
+fn lexical_normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// True when `link` is a symlink resolving to `expected`. Dangling targets
-/// compare lexically, so a link to the right place still reads as the
-/// stack's link even when the checkout is mid-move.
+/// compare lexically (normalized, so `..` segments match), so a link to the
+/// right place still reads as the stack's link even when the checkout is
+/// mid-move.
 fn link_points_at(link: &Path, expected: &Path) -> bool {
     let target = match std::fs::read_link(link) {
         Ok(t) => t,
@@ -384,7 +402,7 @@ fn link_points_at(link: &Path, expected: &Path) -> bool {
     };
     match (abs.canonicalize(), expected.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
-        _ => abs.as_path() == expected,
+        _ => lexical_normalize(&abs) == lexical_normalize(expected),
     }
 }
 
@@ -517,12 +535,24 @@ pub(crate) fn link_cli_for(
         }
         Ok(_) => Ok(cli_status_for(home, link, expected, path_var)),
         Err(_) => {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(expected, link)
-                .map_err(|e| format!("link {}: {e}", tilde(home, link)))?;
-            #[cfg(windows)]
-            std::os::windows::fs::symlink_file(expected, link)
-                .map_err(|e| format!("link {}: {e}", tilde(home, link)))?;
+            // A concurrent link (double-click, two instances) wins the race:
+            // re-read instead of surfacing a raw "File exists (os error 17)".
+            let created = {
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(expected, link)
+                }
+                #[cfg(windows)]
+                {
+                    std::os::windows::fs::symlink_file(expected, link)
+                }
+            };
+            if let Err(e) = created {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    return Ok(cli_status_for(home, link, expected, path_var));
+                }
+                return Err(format!("link {}: {e}", tilde(home, link)));
+            }
             let mut status = cli_status_for(home, link, expected, path_var);
             status.message = if status.on_path {
                 format!(
@@ -826,6 +856,7 @@ mod tests {
         assert!(r.path.is_none());
         assert!(r.message.contains("leaving it alone"), "message: {}", r.message);
         assert!(r.message.contains("needs .git/HEAD and tools/stack/cli.mjs"));
+        assert!(r.message.contains("Remove it and retry get stack"), "message: {}", r.message);
         assert!(fx.cloned().is_empty(), "never clones over an existing dir");
         assert!(dest.join("notes.txt").is_file(), "untouched");
         let _ = std::fs::remove_dir_all(&home);
@@ -1070,6 +1101,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn cli_relative_link_survives_a_moved_checkout() {
+        use std::os::unix::fs::symlink;
+        let home = tmp_home("climove");
+        let (link, shim, bin) = cli_paths(&home);
+        let on = OsString::from(format!("{}:/usr/bin", bin.display()));
+        symlink("../../escacs/stack/bin/stack", &link).unwrap();
+        let st = cli_status_for(&home, &link, &shim, &on);
+        assert_eq!(st.status, "linked-ok");
+        // The checkout moves away: the link dangles, but it still points at
+        // the right place, so it reads as the stack's link, not elsewhere.
+        std::fs::remove_dir_all(home.join("escacs")).unwrap();
+        let st = cli_status_for(&home, &link, &shim, &on);
+        assert_eq!(st.status, "linked-ok", "dangling but correct: {st:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn cli_points_elsewhere_names_the_target() {
         use std::os::unix::fs::symlink;
         let home = tmp_home("clielse");
@@ -1145,6 +1194,40 @@ mod tests {
         assert_eq!(st.status, "bin-not-on-PATH");
         assert!(st.message.contains("linked ~/.local/bin/stack -> "), "message: {}", st.message);
         assert!(st.message.contains("is not on PATH"), "message: {}", st.message);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn concurrent_link_never_surfaces_file_exists() {
+        use std::sync::Barrier;
+        let home = tmp_home("clirace");
+        let (link, shim, bin) = cli_paths(&home);
+        let on = OsString::from(format!("{}:/usr/bin", bin.display()));
+        for _ in 0..100 {
+            let _ = std::fs::remove_file(&link);
+            let barrier = Barrier::new(2);
+            std::thread::scope(|s| {
+                let run = || {
+                    barrier.wait();
+                    link_cli_for(&home, &link, &shim, &on)
+                };
+                let r1 = s.spawn(run);
+                // Closures are not Copy; the second thread inlines the same body.
+                let r2 = s.spawn(|| {
+                    barrier.wait();
+                    link_cli_for(&home, &link, &shim, &on)
+                });
+                for r in [r1.join().unwrap(), r2.join().unwrap()] {
+                    match r {
+                        Ok(st) => assert!(
+                            st.status == "linked-ok" || st.status == "bin-not-on-PATH",
+                            "unexpected status: {st:?}"
+                        ),
+                        Err(e) => panic!("concurrent link surfaced a raw error: {e}"),
+                    }
+                }
+            });
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 

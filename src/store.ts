@@ -77,15 +77,23 @@ export function dismissCliNote(): void {
   setCliNote(null);
 }
 
+let linkingCli = false;
+
 /** Link the stack command from the quiet line's [add stack command] button. */
 export async function addStackCommand(): Promise<void> {
+  // Double-click guard: the first call owns the link (the shell also maps
+  // a lost link race to a fresh status re-read, never a raw error).
+  if (linkingCli) return;
   const c = config();
   if (!c) return;
+  linkingCli = true;
   try {
     const l = await guard('stack command', () => linkStackCli(c.stackPath));
     setCliNote(l.status === 'linked-ok' ? null : { text: l.message, offerLink: false });
   } catch (err) {
     setCliNote({ text: errText(err), offerLink: false });
+  } finally {
+    linkingCli = false;
   }
 }
 
@@ -320,18 +328,21 @@ export async function chooseStackPath(): Promise<string | null> {
  * (linked, left alone, or off PATH). Never throws.
  */
 async function autoLinkCli(stackDir: string | null, prefix: string | null): Promise<void> {
-  let text: string | null = null;
   try {
     const l = await guard('stack command', () => linkStackCli(stackDir));
-    if (l.status !== 'linked-ok') text = l.message;
+    if (l.status === 'linked-ok') {
+      // A fresh link gets its one quiet line; an already-correct link
+      // stays silent (a provision prefix still shows on its own).
+      const linked = l.message.startsWith('linked ') ? `stack command linked → ${l.link}` : null;
+      const text = prefix && linked ? `${prefix}; ${linked}` : (prefix ?? linked);
+      if (text) setCliNote({ text, offerLink: false });
+      return;
+    }
+    setCliNote({ text: prefix ? `${prefix}; ${l.message}` : l.message, offerLink: false });
   } catch (err) {
-    text = errText(err);
+    const text = prefix ? `${prefix}; ${errText(err)}` : errText(err);
+    setCliNote({ text, offerLink: false });
   }
-  if (!text) {
-    if (prefix) setCliNote({ text: prefix, offerLink: false });
-    return;
-  }
-  setCliNote({ text: prefix ? `${prefix}; ${text}` : text, offerLink: false });
 }
 
 /**

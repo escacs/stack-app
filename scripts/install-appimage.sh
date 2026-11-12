@@ -135,6 +135,12 @@ resolve_stack_dir() {
     || true
 }
 
+# Lexical absolute path, working when the target dangles (GNU coreutils).
+lexical_path() {
+  if command -v realpath >/dev/null 2>&1; then realpath -m "$1" 2>/dev/null && return; fi
+  readlink -m "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
+}
+
 link_stack_shim() {  # link_stack_shim <stackdir>
   local shim="$1/bin/stack"
   local link="$BIN_DIR/stack"
@@ -142,6 +148,22 @@ link_stack_shim() {  # link_stack_shim <stackdir>
   if [ -e "$link" ] && [ ! -L "$link" ]; then
     echo "warning: $link exists and is not a symlink; leaving it alone" >&2
     return 0
+  fi
+  # Same rules as the app (provision.rs link_cli_for): a symlink to
+  # something else is left alone; only a missing link (or one already
+  # pointing at this stack's shim) is created.
+  if [ -L "$link" ]; then
+    local current got want
+    current="$(readlink "$link")"
+    want="$(lexical_path "$shim")"
+    case "$current" in
+      /*) got="$(lexical_path "$current")" ;;
+      *) got="$(lexical_path "$BIN_DIR/$current")" ;;
+    esac
+    if [ "$got" != "$want" ]; then
+      echo "warning: $link points at $current, not at the stack shim; leaving it alone" >&2
+      return 0
+    fi
   fi
   ln -sf "$shim" "$link"
   echo "linked $link -> $shim"

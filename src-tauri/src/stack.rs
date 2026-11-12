@@ -872,7 +872,7 @@ fn resolve_stack_dir_inner(
             cur = dir.parent();
         }
     }
-    Err("no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it."
+    Err("no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Press get stack, or pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK."
         .to_string())
 }
 

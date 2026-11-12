@@ -85,9 +85,9 @@ AppImage instead (slower, 512px only). What it does:
 - runs `scripts/provision-stack.sh` (skip with `--no-provision`, or point
   at an existing checkout with `--stack <dir>`)
 - symlinks the checkout's `bin/stack` to `~/.local/bin/stack`, so the `stack`
-  terminal command is on `PATH` (skipped with a warning when something else
-  already owns that name; removed on uninstall only if it still points at a
-  stack checkout)
+  terminal command is on `PATH` (never replaces a non-symlink or a link to
+  something else — warns and leaves it alone; removed on uninstall only if
+  it still points at a stack checkout's `bin/stack`)
 - refreshes the desktop and icon caches
 
 Options: `--prefix <dir>` (default `~/.local`), `--reinstall`.
@@ -160,6 +160,11 @@ add it. So on a machine with `gh` authenticated and no stack checkout,
 launching the AppImage directly ends, after one click, with
 `~/escacs/stack` cloned, the app working, and `stack --help` working in a
 new terminal.
+
+Known limitation: while **get stack** runs, the button only shows
+`getting…` — the shell does not report stages (checking auth, cloning
+with `gh`, trying ssh). A clone can take up to two minutes on a slow
+network before it either lands or fails with the one actionable error.
 
 ## Troubleshooting
 
