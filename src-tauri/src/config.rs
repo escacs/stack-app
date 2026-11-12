@@ -130,6 +130,16 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
     write_config_to(&path, &config)
 }
 
+/// Pin the stack checkout path (first-run provisioning keeps every other
+/// key). Goes through the same locked load/write as every config command.
+pub(crate) fn pin_stack_path(app: &AppHandle, path: &str) -> Result<(), String> {
+    let _guard = lock_config()?;
+    let config_path = config_path(app)?;
+    let mut config = load_config_from(&config_path)?;
+    config.stack_path = Some(path.to_string());
+    write_config_to(&config_path, &config)
+}
+
 /// Prepend `path` to the recent-projects list (deduplicated, capped).
 #[tauri::command(async)]
 pub fn add_recent_project(app: AppHandle, path: String) -> Result<AppConfig, String> {

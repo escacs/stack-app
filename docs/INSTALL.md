@@ -93,8 +93,9 @@ AppImage instead (slower, 512px only). What it does:
 Options: `--prefix <dir>` (default `~/.local`), `--reinstall`.
 
 No checkout? The AppImage also runs standalone — `chmod +x` it and launch
-directly — but then there is no menu entry and no auto-provisioning; the
-app's first-run picker covers the stack path.
+directly — but then there is no menu entry and no installer provisioning;
+the app's first-run screen covers it instead with one click (get stack,
+below).
 
 **Upgrade**: re-run the installer with the new AppImage plus `--reinstall`
 (or accept the in-app update when offered — that upgrades in place).
@@ -147,6 +148,19 @@ still honoured when set. The script never sees credentials — auth stays
 inside `gh`/`ssh`. Re-run it any time; it never overwrites an existing
 checkout.
 
+The app itself provisions the same way: when no usable checkout resolves,
+the first-run screen offers **get stack** (primary) next to the folder
+picker (secondary). It runs the same steps in the same order — keep, `gh`
+clone, ssh clone — then pins `stackPath`, and links the checkout's
+`bin/stack` to `~/.local/bin/stack` with the installer's rules (never
+replaces a non-symlink or a link to something else; warns when
+`~/.local/bin` is not on `PATH`). The folder picker auto-links too. When a
+valid stack's command is not linked, one quiet dismissible line offers to
+add it. So on a machine with `gh` authenticated and no stack checkout,
+launching the AppImage directly ends, after one click, with
+`~/escacs/stack` cloned, the app working, and `stack --help` working in a
+new terminal.
+
 ## Troubleshooting
 
 - **AppImage won't start, mount/FUSE error** — install FUSE 2 (table above).
@@ -157,10 +171,11 @@ checkout.
   on a newer distro than yours. Use the release build (ubuntu-22.04
   baseline) instead of a locally built one.
 - **"node was not found on PATH"** — install Node.js 22+, relaunch.
-- **"stack checkout not found" / setup screen on launch** — provisioning
-  found no auth. `gh auth login`, re-run `scripts/provision-stack.sh`, and
-  press re-check; or clone `git@github.com:escacs/stack.git` yourself and
-  pick the folder.
+- **"stack checkout not found" / setup screen on launch** — nothing
+  provisioned the checkout yet. Press **get stack** (needs `gh` auth or an
+  ssh key for the private repo); if it reports no auth, `gh auth login`
+  and retry, or clone `git@github.com:escacs/stack.git` yourself and pick
+  the folder.
 - **Window shows a generic icon** — the desktop entry expects
   `StartupWMClass=stack-app` (verified against tauri-bundler output). If
   your desktop still mismatches, report the `WM_CLASS` from

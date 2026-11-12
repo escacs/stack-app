@@ -141,6 +141,10 @@
       ? { path: fx.stack.path, source: fx.stack.source }
       : { path: null, source: "missing" },
     validate_stack: async () => structuredClone(fx.stack),
+    // Provisioning fixtures stay settled: the old mock has no setup screen.
+    provision_stack: async () => ({ status: "kept", path: "/home/dev/escacs/stack", message: "already at ~/escacs/stack" }),
+    stack_cli_status: async () => ({ status: "linked-ok", link: "~/.local/bin/stack", expected: "~/escacs/stack/bin/stack", actual: "~/escacs/stack/bin/stack", onPath: true, message: "the stack command is linked." }),
+    link_stack_cli: async () => ({ status: "linked-ok", link: "~/.local/bin/stack", expected: "~/escacs/stack/bin/stack", actual: "~/escacs/stack/bin/stack", onPath: true, message: "the stack command is linked." }),
   };
 
   // Deterministic reloads per scenario.

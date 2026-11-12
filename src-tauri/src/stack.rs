@@ -531,8 +531,9 @@ fn clean_env(cmd: &mut Command, deep: bool) {
 }
 
 /// The environment for every stack child: default cleaning, or the retry
-/// level once a probe showed it is needed.
-fn unpoison_env(cmd: &mut Command) {
+/// level once a probe showed it is needed. Shared with provisioning, whose
+/// `gh`/`git` children inherit the same poisoned AppImage variables.
+pub(crate) fn unpoison_env(cmd: &mut Command) {
     clean_env(cmd, SCRUB_ENV.load(Ordering::Relaxed));
 }
 
@@ -546,13 +547,13 @@ fn find_node_on_path() -> Option<PathBuf> {
 const NODE_NOT_FOUND: &str = "node was not found on PATH. Install Node.js 22 or newer (https://nodejs.org), then relaunch the app.";
 
 #[cfg(unix)]
-fn is_executable_file(p: &Path) -> bool {
+pub(crate) fn is_executable_file(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
-fn is_executable_file(p: &Path) -> bool {
+pub(crate) fn is_executable_file(p: &Path) -> bool {
     p.is_file()
 }
 
@@ -565,33 +566,39 @@ fn effective_path(path_var: &OsStr, appdir: &OsStr) -> OsString {
     strip_entries(path_var, appdir, false).unwrap_or_else(|| path_var.to_os_string())
 }
 
-/// First `node` on `PATH` reached through an absolute entry. Empty entries
+/// First `name` on `PATH` reached through an absolute entry. Empty entries
 /// (the current directory) and relative entries (`.`, `bin`, ...) are
-/// skipped: the child runs with the project as its working directory, so a
-/// bare `node` lookup could execute a project's `./node`, which would break
-/// the "never run project code" contract. Resolves from the cleaned `PATH`
-/// the child will get, so the probe and the spawn always agree on which
-/// binary runs. Pure so tests can pin it without touching the process env.
-fn find_node_in(path_var: &OsStr, appdir: &OsStr) -> Option<PathBuf> {
+/// skipped: a child running with the project as its working directory must
+/// never pick up a project's `./node` (or `./gh`, `./git`), which would
+/// break the "never run project code" contract. Resolves from the cleaned
+/// `PATH` the child will get, so the probe and the spawn always agree on
+/// which binary runs. Pure so tests can pin it without touching the process
+/// env. Shared with provisioning, which resolves `gh` and `git` the same way.
+pub(crate) fn find_binary_in(name: &str, path_var: &OsStr, appdir: &OsStr) -> Option<PathBuf> {
     let effective = effective_path(path_var, appdir);
     for dir in std::env::split_paths(&effective) {
         if dir.as_os_str().is_empty() || !dir.is_absolute() {
             continue;
         }
-        let node = dir.join("node");
-        if is_executable_file(&node) {
-            return Some(node);
+        let candidate = dir.join(name);
+        if is_executable_file(&candidate) {
+            return Some(candidate);
         }
-        // Windows installs node.exe; the OS lookup used to find it for us.
+        // Windows installs node.exe (gh.exe, git.exe); the OS lookup used to
+        // find it for us.
         #[cfg(windows)]
         {
-            let exe = dir.join("node.exe");
+            let exe = dir.join(format!("{name}.exe"));
             if exe.is_file() {
                 return Some(exe);
             }
         }
     }
     None
+}
+
+fn find_node_in(path_var: &OsStr, appdir: &OsStr) -> Option<PathBuf> {
+    find_binary_in("node", path_var, appdir)
 }
 
 fn resolve_node() -> Option<PathBuf> {
@@ -869,6 +876,13 @@ fn resolve_stack_dir_inner(
         .to_string())
 }
 
+/// A checkout is usable when it is a git repo with HEAD and ships the CLI.
+/// Same rule as `usable()` in scripts/provision-stack.sh; shared with
+/// provisioning so the two can never drift.
+pub(crate) fn is_usable_checkout(dir: &Path) -> bool {
+    dir.join("tools/stack/cli.mjs").is_file() && has_git_head(dir)
+}
+
 fn has_git_head(dir: &Path) -> bool {
     let dotgit = dir.join(".git");
     if dotgit.join("HEAD").is_file() {
@@ -1050,9 +1064,9 @@ pub fn run_stack(
 }
 
 #[derive(Debug)]
-struct Captured {
-    bytes: Vec<u8>,
-    truncated: bool,
+pub(crate) struct Captured {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) truncated: bool,
 }
 
 /// Drain a pipe to EOF, keeping the first [`MAX_OUTPUT_BYTES`] bytes. Keeps
@@ -1163,10 +1177,27 @@ fn join_drains(
 
 /// Run `cmd` with piped output, killing the child past `timeout`. Pipes drain
 /// on threads so a chatty child can never deadlock against a full buffer.
-fn run_with_timeout(
+pub(crate) fn run_with_timeout(
     cmd: &mut Command,
     timeout: Duration,
     label: &str,
+) -> Result<(i32, Captured, Captured), String> {
+    run_with_timeout_hint(
+        cmd,
+        timeout,
+        &format!("stack {label}"),
+        "The stack clone or node may be busy — retry, or narrow the command.",
+    )
+}
+
+/// Same runner with the caller's own wording, for non-`stack_run` children
+/// (provisioning clones). `what` names the operation ("gh clone of
+/// escacs/stack"), `hint` is the one actionable sentence after a timeout.
+pub(crate) fn run_with_timeout_hint(
+    cmd: &mut Command,
+    timeout: Duration,
+    what: &str,
+    hint: &str,
 ) -> Result<(i32, Captured, Captured), String> {
     #[cfg(unix)]
     {
@@ -1178,7 +1209,7 @@ fn run_with_timeout(
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
         .spawn()
-        .map_err(|e| format!("run stack {label}: {e}"))?;
+        .map_err(|e| format!("run {what}: {e}"))?;
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
     let out_h = std::thread::spawn(move || drain_capped(stdout));
@@ -1187,7 +1218,7 @@ fn run_with_timeout(
     let code = loop {
         match child
             .try_wait()
-            .map_err(|e| format!("wait for stack {label}: {e}"))?
+            .map_err(|e| format!("wait for {what}: {e}"))?
         {
             Some(status) => break status.code().unwrap_or(-1),
             None => {
@@ -1196,7 +1227,7 @@ fn run_with_timeout(
                     let _ = out_h.join();
                     let _ = err_h.join();
                     return Err(format!(
-                        "stack {label} timed out after {}s and was killed. The stack clone or node may be busy — retry, or narrow the command.",
+                        "{what} timed out after {}s and was killed. {hint}",
                         timeout.as_secs()
                     ));
                 }
