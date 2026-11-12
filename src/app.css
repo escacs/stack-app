@@ -129,6 +129,14 @@ input[type="text"]::placeholder { color: var(--ghost); }
 /* dim key hint under every browse list (never in the entry detail) */
 .listhint { margin: 12px 0 0; }
 
+/* browse refresh: a quiet button at the prompt line's right end, idling
+   dim like the row imports; a failed reload keeps the stale list and puts
+   its error on its own wrapped line below the prompt */
+.refreshbox { display: inline-flex; align-items: baseline; gap: 0 1ch; margin-left: 2ch; }
+.refreshbox .btn { opacity: .45; }
+.refreshbox .btn:hover, .refreshbox .btn:focus-visible { opacity: 1; }
+.refresherr { flex-basis: 100%; }
+
 /* first-run onboarding: one question per screen ------------------------ */
 .onboard { max-width: 64ch; margin: 6vh auto 0; }
 .onboard .prompt { font-size: 20px; margin: 28px 0 20px; }

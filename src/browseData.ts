@@ -123,6 +123,21 @@ export function previewKey(source: string, id: string, file: string): string {
 export type CatalogData = { raw: string; entries: JsonEntry[]; uncommitted: Set<string> };
 export const catalogs = new Map<string, CatalogData>();
 
+/**
+ * Drop cached catalogs so the next load re-reads the checkout from
+ * scratch: one source, or every source when omitted (a stack-side change
+ * is visible under any project that points at the checkout).
+ */
+export function clearCatalogs(source?: string): void {
+  if (source === undefined) catalogs.clear();
+  else catalogs.delete(source);
+}
+
+/** Short dim result after a catalog refresh: `refreshed · 93 entries`. */
+export function refreshLine(count: number): string {
+  return `refreshed · ${count} ${count === 1 ? 'entry' : 'entries'}`;
+}
+
 // ------------------------------------------------------------------ fetch plumbing
 
 /** Runs tasks at most `limit` at a time, FIFO. */
@@ -186,6 +201,14 @@ export function createFetchCache<V>(limit: number) {
     },
     load: (key: string, run: () => Promise<V | undefined>, live: () => boolean = () => true) =>
       load(key, run, live),
+    /**
+     * Drop finished results so the next load re-fetches. In-flight
+     * fetches are left alone: they already read the live checkout and
+     * land fresh when they resolve.
+     */
+    clear(): void {
+      done.clear();
+    },
   };
 }
 
@@ -224,3 +247,8 @@ export function whenVisible(el: Element, cb: () => void): () => void {
 
 /** Module-wide preview cache: data URLs (or null when the file has no image bytes). */
 export const previewCache = createFetchCache<string | null>(3);
+
+/** Empty the module-wide preview cache (row thumbnails, entry previews). */
+export function clearPreviews(): void {
+  previewCache.clear();
+}
