@@ -196,6 +196,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   };
   onCleanup(clearDryTimer);
+  // Leaving Browse mid-batch (or mid-row-import) stops the run after the
+  // current entry: the generations invalidate every later answer, like a
+  // route or project change does through clearBatchState. Without this the
+  // loop would keep importing with no UI and no cancel.
+  onCleanup(() => {
+    qiGen++;
+    dryGen++;
+  });
 
   // Changes only when the project or stack checkout does, never on config edits.
   const source = createMemo(() => sourceKey(config()));
@@ -338,6 +346,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       if (!previewFresh(gen, qiGen)) return;
       const r = fromStackOut<ImportJson>(out);
       setQi({ id: e.id, phase: 'done', line: quickImportLine(r, e.id), sections: describeImport(r), expanded: false });
+      // A single-row bar import delegates here: the row is imported, so it
+      // leaves the selection instead of stranding `1 selected`.
+      setSelected((prev) => {
+        if (!prev.has(e.id)) return prev;
+        const next = new Set(prev);
+        next.delete(e.id);
+        return next;
+      });
       await refreshLock();
       // Import creates stack.toml implicitly: the project page's set-up slot
       // must re-check on the next visit.
@@ -566,21 +582,37 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       stopped: false,
     };
     const refusals: BatchRefusal[] = [];
+    // Imports attempted so far: a route change or unmount mid-run still
+    // lands the lock/report refresh, so the project page shows the imports.
+    let attempted = 0;
+    /** A stale early return still refreshes once anything was attempted. */
+    const refreshAfterStale = async (): Promise<void> => {
+      if (!attempted) return;
+      await refreshLock();
+      await refreshReport();
+    };
     setBatchRes(new Map());
     setBatch({ phase: 'running', label: b.label, targets: b.targets, at: 0, counts, cancel: false });
     for (let i = 0; i < b.targets.length; i++) {
       const t = b.targets[i];
       const cur = batchRunning(batch());
-      if (!cur) return;
+      if (!cur) {
+        await refreshAfterStale();
+        return;
+      }
       if (cur.cancel) {
         counts.stopped = true;
         break;
       }
       setBatch({ ...cur, at: i });
       setBatchRes((prev) => new Map(prev).set(t.id, { phase: 'working' }));
+      attempted++;
       try {
         const out = await stackRun('import', importArgs(t.id, t.dest), c.project, c.stackPath);
-        if (!previewFresh(gen, qiGen)) return;
+        if (!previewFresh(gen, qiGen)) {
+          await refreshAfterStale();
+          return;
+        }
         const r = fromStackOut<ImportJson>(out);
         const e = index().byId.get(t.id);
         if (r.imported.some((p) => p.id === t.id)) {
@@ -596,7 +628,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         const sections = describeImport(r);
         setBatchRes((prev) => new Map(prev).set(t.id, { phase: 'done', line, sections, expanded: false }));
       } catch (err) {
-        if (!previewFresh(gen, qiGen)) return;
+        if (!previewFresh(gen, qiGen)) {
+          await refreshAfterStale();
+          return;
+        }
         const text = errText(err);
         counts.refused++;
         refusals.push({ id: t.id, line: quickImportError(text), err: text, lookalikes: refusalFiles(text) });
@@ -605,10 +640,16 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         );
       }
     }
-    if (!previewFresh(gen, qiGen)) return;
+    if (!previewFresh(gen, qiGen)) {
+      await refreshAfterStale();
+      return;
+    }
     await refreshLock();
     // The lock is authoritative again: landed rows flip through it from here.
-    if (!previewFresh(gen, qiGen)) return;
+    if (!previewFresh(gen, qiGen)) {
+      await refreshReport();
+      return;
+    }
     setLanded(new Set<string>());
     await refreshReport();
     void load();
