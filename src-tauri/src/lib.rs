@@ -2,13 +2,15 @@
 //!
 //! Security model: the app touches only the user-selected project dir, the
 //! stack dir, and its own config dir. All paths are canonicalized and
-//! confined (see `paths`). It never runs project code (the only subprocess is
-//! `node <stack>/tools/stack/cli.mjs`), never invokes git itself, never
-//! commits or pushes, and handles no credentials.
+//! confined (see `paths`). It never runs project code (subprocesses are
+//! `node <stack>/tools/stack/cli.mjs` plus, during first-run provisioning,
+//! fixed `gh`/`git` clone commands with a fixed repo and destination — see
+//! `provision`), never commits or pushes, and handles no credentials.
 
 mod config;
 pub mod paths;
 pub mod project;
+pub mod provision;
 pub mod scan;
 pub mod stack;
 
@@ -87,6 +89,9 @@ pub fn run() {
             stack::stack_location,
             stack::validate_stack,
             stack::stack_run,
+            provision::provision_stack,
+            provision::stack_cli_status,
+            provision::link_stack_cli,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the stack app");

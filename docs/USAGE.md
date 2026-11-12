@@ -529,5 +529,9 @@ Routes are `browse`, `browse/<kind>`, `browse/all`, `browse/<id>`,
 | `missing` | installed with rows whose files are missing (shown as `edited`) |
 | `lookalike` | an import refused for `skills/file-pr` |
 | `fresh` | installed in a plain folder: `init stack.toml` |
-| `bad-stack` | the stack checkout setup screen |
+| `bad-stack` | the stack checkout setup screen; get stack clones and the gate lifts |
 | `no-node` | the setup screen with node missing |
+| `no-auth` | the setup screen with no GitHub auth: get stack fails with the one actionable error |
+| `no-cli` | a valid stack whose command is not linked: the quiet [add stack command] line |
+| `cli-foreign` | the quiet line when something else owns the `stack` name (no offer) |
+| `no-path` | the quiet line when the bin dir is off PATH (no offer) |
