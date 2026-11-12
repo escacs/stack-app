@@ -362,6 +362,66 @@ export function presetCountTitle(imports: PresetImport[], ids: Set<string>, deps
   return deps > 0 ? `${base}, ${deps} ${deps === 1 ? 'dependency' : 'dependencies'} (named by the preview)` : base;
 }
 
+/** Rows a long presets list shows before its `+N more` toggle. */
+export const PRESET_ROWS = 5;
+/** More presets than this earns the type-to-filter input. */
+export const PRESET_FILTER_MIN = 8;
+
+/** Whether the presets section needs a filter input at this list size. */
+export function presetsFilterable(total: number): boolean {
+  return total > PRESET_FILTER_MIN;
+}
+
+/**
+ * Whether the presets section starts unfolded. A project that already has
+ * imports treats presets as a starting point, so a list longer than the
+ * default row count starts folded to its heading; a short list, or any list
+ * in a project with nothing imported yet, is open.
+ */
+export function presetsStartOpen(total: number, imported: number): boolean {
+  return imported === 0 || total <= PRESET_ROWS;
+}
+
+/**
+ * Presets matching a typed filter: every space-separated term must appear,
+ * case-insensitively, in the name or the description. An empty filter keeps
+ * everything.
+ */
+export function matchPresets(list: PresetListItem[], query: string): PresetListItem[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return list;
+  return list.filter((p) => {
+    const hay = `${p.name} ${p.description}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+/**
+ * The rows to draw: the filter's matches, cut to `limit` unless `all`. The
+ * preset whose preview is open (`pinned`) always stays, in its place in the
+ * list, even when the filter or the cut would hide it. `hidden` counts
+ * matches left out (what `+N more` would reveal).
+ */
+export function visiblePresets(
+  list: PresetListItem[],
+  query: string,
+  all: boolean,
+  pinned: string | null,
+  limit: number = PRESET_ROWS,
+): { rows: PresetListItem[]; hidden: number } {
+  const matches = new Set(matchPresets(list, query));
+  const rows: PresetListItem[] = [];
+  let seen = 0;
+  let hidden = 0;
+  for (const p of list) {
+    const match = matches.has(p);
+    const idx = match ? seen++ : -1;
+    if (p.name === pinned || (match && (all || idx < limit))) rows.push(p);
+    else if (match) hidden++;
+  }
+  return { rows, hidden };
+}
+
 // ------------------------------------------------------------------ op summaries
 
 export type OpSection = { title: string; lines: string[]; tone?: 'bad' | 'dim' };

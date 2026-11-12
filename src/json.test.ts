@@ -15,12 +15,15 @@ import {
   entryMarkers,
   fromStackOut,
   importArgs,
+  matchPresets,
   parseJsonOut,
   presetApplyArgs,
   presetCountText,
   presetCountTitle,
   presetImportsHint,
   presetListArgs,
+  presetsFilterable,
+  presetsStartOpen,
   presetShowArgs,
   previewFresh,
   refusalFiles,
@@ -28,6 +31,7 @@ import {
   showFileArgs,
   toShowDoc,
   toShowFile,
+  visiblePresets,
   toStatusRows,
   type ImportJson,
   type InitJson,
@@ -636,5 +640,63 @@ describe('refusalFiles', () => {
   it('returns [] for other errors', () => {
     expect(refusalFiles('no entry "x"')).toEqual([]);
     expect(refusalFiles('')).toEqual([]);
+  });
+});
+
+describe('presets at scale', () => {
+  const mk = (name: string, description = '') => ({ name, description, imports: [] });
+  const list = [
+    mk('web', 'React starter'),
+    mk('docs', 'Docs setup: conventions'),
+    mk('api', 'Server starter'),
+    mk('cli', 'Command line tool'),
+    mk('desktop', 'Tauri app, React optional'),
+    mk('mobile', 'Mobile shell'),
+    mk('landing', 'Marketing page'),
+    mk('lib', 'Library repo'),
+  ];
+
+  it('starts open for a short list or an empty project, folded otherwise', () => {
+    expect(presetsStartOpen(3, 4)).toBe(true);
+    expect(presetsStartOpen(5, 4)).toBe(true);
+    expect(presetsStartOpen(12, 0)).toBe(true);
+    expect(presetsStartOpen(12, 1)).toBe(false);
+  });
+
+  it('offers a filter only past eight presets', () => {
+    expect(presetsFilterable(8)).toBe(false);
+    expect(presetsFilterable(9)).toBe(true);
+  });
+
+  it('filters name and description, case-insensitive, every term must match', () => {
+    expect(matchPresets(list, '').length).toBe(8);
+    expect(matchPresets(list, '  ').length).toBe(8);
+    expect(matchPresets(list, 'REACT').map((p) => p.name)).toEqual(['web', 'desktop']);
+    expect(matchPresets(list, 'react start').map((p) => p.name)).toEqual(['web']);
+    expect(matchPresets(list, 'zzz')).toEqual([]);
+  });
+
+  it('cuts to five rows with a hidden count, or shows all', () => {
+    const cut = visiblePresets(list, '', false, null);
+    expect(cut.rows.map((p) => p.name)).toEqual(['web', 'docs', 'api', 'cli', 'desktop']);
+    expect(cut.hidden).toBe(3);
+    const all = visiblePresets(list, '', true, null);
+    expect(all.rows.length).toBe(8);
+    expect(all.hidden).toBe(0);
+  });
+
+  it('counts the cut against the filter matches, not the whole list', () => {
+    const r = visiblePresets(list, 'e', false, null, 2);
+    expect(r.rows.length).toBe(2);
+    expect(r.hidden).toBe(matchPresets(list, 'e').length - 2);
+  });
+
+  it('keeps the previewed preset in place, past the cut and past the filter', () => {
+    const cut = visiblePresets(list, '', false, 'landing');
+    expect(cut.rows.map((p) => p.name)).toEqual(['web', 'docs', 'api', 'cli', 'desktop', 'landing']);
+    expect(cut.hidden).toBe(2);
+    const filtered = visiblePresets(list, 'docs', false, 'mobile');
+    expect(filtered.rows.map((p) => p.name)).toEqual(['docs', 'mobile']);
+    expect(filtered.hidden).toBe(0);
   });
 });

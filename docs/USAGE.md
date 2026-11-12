@@ -339,9 +339,7 @@ imported from the stack, and presets. It needs a project. The old
 `installed` route still opens this page, as an alias.
 
 ```
-set up                                    ← only without stack.toml
-no stack.toml here yet — …
-[init stack.toml]
+[init stack.toml]                         ← only without stack.toml
 
 imported  skills/file-pr        @b51359b → .agents/skills/file-pr        remove
 imported  styles/folio-light    @b51359b → .agents/skills/folio-light    remove
@@ -351,7 +349,7 @@ sync @b51359b
 
 adopt…
 
-presets
+presets 2
 web   React starter: button plus the file-pr skill. . . .  all here   preview apply
 docs  Docs setup: conventions plus the agents-md scaffold. . .  2 new   preview apply
 ```
@@ -395,7 +393,7 @@ A deleted file counts as edited; `sync` restores it.
 | `update all` | any row is `update` | the same for every row | |
 | `remove` | every row | deletes the import's unedited files and its entry in `stack.toml` | does not delete edited files; they are listed as `kept (edited here)` |
 | `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
-| `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
+| `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
 | `adopt…` | always | a form for an entry id, such as `skills/file-pr`, and an optional `--to`. It runs the same import as Browse | differing files are listed and nothing is written |
 | preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
 | preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
@@ -412,16 +410,32 @@ it ends.
 ### Presets
 
 Presets are named import plans. The stack defines them in its
-`presets/*.toml` files. Each row here is one preset: its name, description,
-compact counts against the lock (`M new`, or `all here`; `· N dep` once a
-preview has named auto-imported dependencies; hover for the long form), and
-two buttons. `preview` runs a `--dry-run` apply and unfolds a tree right under
-the row: one `id → path` line per entry, dependencies tagged `(dep)` (hover
-for what requires them), entries already imported dimmed with `(✓ here)`,
-colliding files marked `!` with `(exists)`. `hide` folds it again. Nothing is
-written. `apply` imports
-all of the preset's rows, the same way `import` does. Hover `apply` to see
-what it imports.
+`presets/*.toml` files. The heading carries the count (`presets 12`). Each
+row is one preset on one line: its name, description (cut to fit; hover for
+the full text), compact counts against the lock (`M new`, or `all here`;
+`· N dep` once a preview has named auto-imported dependencies; hover for the
+long form), and two buttons. `preview` runs a `--dry-run` apply and unfolds a
+tree right under the row: one `id → path` line per entry, dependencies tagged
+`(dep)` (hover for what requires them), entries already imported dimmed with
+`(✓ here)`, colliding files marked `!` with `(exists)`. `hide` folds it
+again. Nothing is written. `apply` imports all of the preset's rows, the same
+way `import` does. Hover `apply` to see what it imports.
+
+A long list stays short on the page:
+
+- **Five rows, then `+N more`.** More than five presets show the first five.
+  `+N more` reveals the rest, `− fewer` goes back.
+- **Filter.** With more than eight presets a `filter…` field sits in the
+  heading line. Type to narrow by name or description; every word you type
+  must match (any case). The heading shows `3/12` while filtering. `Esc`
+  clears the text, a second `Esc` leaves the field.
+- **Open preview stays.** A preview stays attached to its row, and that row
+  stays visible whatever the filter or the cut says.
+- **Collapse.** The heading is a toggle (`· collapse` / `· expand`) when
+  there are more than five presets. On a project that already has imports, a
+  list longer than five starts collapsed to its heading, since presets are
+  mostly a starting point; in a project with nothing imported it starts open.
+  Your choice sticks until you switch project.
 
 ### Footer settings
 
@@ -549,5 +563,8 @@ opens the project page, as an alias.
 | `missing` | project page with rows whose files are missing (shown as `edited`) |
 | `lookalike` | an import refused for `skills/file-pr` |
 | `fresh` | project page in a plain folder: the set-up slot with `init stack.toml` |
+| `many` | project page with three imports and 15 presets: the presets start collapsed |
+| `manyfresh` | plain folder with 15 presets: the set-up slot, presets open |
+| `lots` | three imports and 34 presets |
 | `bad-stack` | the stack checkout setup screen |
 | `no-node` | the setup screen with node missing |

@@ -8,7 +8,8 @@
 // Bare `#empty` etc. still work (home route).
 //
 // Scenarios: empty, populated, no-node, conflicts, missing, lookalike,
-// scan, noworker, noproject, bad-stack, fresh.
+// scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
+// imports), manyfresh (15 presets, no stack.toml), lots (36 presets).
 (() => {
   'use strict';
 
@@ -217,6 +218,57 @@
     },
   ];
 
+  // A bigger list for the many/manyfresh/lots scenarios: the first two are
+  // the real fixtures above, the rest combine catalog entries (names and
+  // descriptions invented, a few long enough to truncate).
+  const makePresets = (n) => {
+    const ids = CATALOG.filter((e) => e.committed !== false && !e.id.startsWith('workers/')).map((e) => e.id);
+    const more = [
+      ['api', 'Server starter: conventions, the file-pr skill and an AGENTS.md scaffold.'],
+      ['cli', 'Command line tool: conventions plus the ponytail skill for small changes.'],
+      ['desktop', 'Tauri + Solid desktop app: solid-js reference, button and the escacs mark, with the folio-light style on top.'],
+      ['mobile', 'Mobile web shell: button, icon button and the logo mark.'],
+      ['landing', 'Marketing page: folio-light style, the mark and a button.'],
+      ['lib', 'Library repo: conventions and agents-md.'],
+      ['monorepo', 'Workspace root: AGENTS.md, conventions and the review skills for every package.'],
+      ['review', 'Review setup: file-pr and ponytail.'],
+      ['design', 'Design handoff: folio-light, the mark and the button set.'],
+      ['agents', 'Agent scaffold: agents-md plus conventions.'],
+      ['data', 'Data project: conventions only.'],
+      ['game', 'Game jam: ponytail, the mark and a button.'],
+      ['oss', 'Open source repo: conventions, agents-md and file-pr, so contributors land on the same rules.'],
+      ['site', 'Static site: folio-light and the mark.'],
+      ['pr-only', 'Just the pull request skill.'],
+      ['icons', 'Icon set: icon-button and the mark.'],
+      ['tiny', 'The smallest useful setup.'],
+      ['solid', 'SolidJS app: solid-js reference and the button.'],
+      ['react-ui', 'React UI kit: button and icon button.'],
+      ['writing', 'Writing project: folio-light and conventions.'],
+      ['plugin', 'Plugin repo: AGENTS.md and the ponytail skill.'],
+      ['infra', 'Infra repo: conventions, no UI.'],
+      ['playground', 'Throwaway sandbox with every skill.'],
+      ['brand', 'Brand kit: mark, folio-light, button.'],
+      ['audit', 'Audit trail: conventions and file-pr.'],
+      ['docs-site', 'Docs site: folio-light, conventions and agents-md.'],
+      ['extension', 'Browser extension: button, icon button, mark.'],
+      ['bot', 'Chat bot: conventions, ponytail and agents-md.'],
+      ['kiosk', 'Kiosk app: solid-js reference, button, mark and the folio-light style for a clean full screen layout.'],
+      ['handoff', 'Hand a repo to a new owner: conventions and agents-md.'],
+      ['starter-kit', 'Everything small: file-pr, ponytail and the mark.'],
+      ['studio', 'Design studio repo: style, mark and button.'],
+    ];
+    const pick = (i, k) => Array.from({ length: k }, (_, j) => ids[(i * 3 + j * 2) % ids.length]);
+    const out = [...PRESETS];
+    for (let i = 0; out.length < n && i < more.length; i++) {
+      const [name, description] = more[i];
+      out.push({
+        name, description, source: `presets/${name}.json`,
+        imports: [...new Set(pick(i + 1, 1 + (i % 3)))].map((id) => ({ id, to: null })),
+      });
+    }
+    return out;
+  };
+
   // ------------------------------------------------------------- scenarios
 
   const baseConfig = {
@@ -412,6 +464,12 @@
       pick: '/home/dev/projects/sandbox',
       fresh: true,
     }),
+    // Many presets: the presets section must scale. `many` has three
+    // imports (the section starts collapsed), `manyfresh` has none (set-up
+    // slot, section open), `lots` has 33 presets and three imports.
+    many: () => ({ ...SCENARIOS.populated(), presets: makePresets(15) }),
+    manyfresh: () => ({ ...SCENARIOS.fresh(), presets: makePresets(15) }),
+    lots: () => ({ ...SCENARIOS.populated(), presets: makePresets(40) }),
     // First-run gate: nothing validates, the app must show StackSetup.
     'bad-stack': () => ({
       config: { ...baseConfig, stackPath: null, worker: null, project: null },
@@ -432,6 +490,7 @@
   };
 
   const fx = (SCENARIOS[scenario] ?? SCENARIOS.populated)();
+  const presets = () => fx.presets ?? PRESETS;
   const okOut = (stdout) => ({ stdout, stderr: '', code: 0, truncated: false });
   const errOut = (stderr, code = 1) => ({ stdout: '', stderr, code, truncated: false });
   const jsonOut = (v) => okOut(JSON.stringify(v, null, 2));
@@ -563,12 +622,12 @@
       case 'preset': {
         const [action, name] = positional;
         if (action === 'list') {
-          const rows = PRESETS.map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
+          const rows = presets().map((p) => ({ name: p.name, description: p.description, imports: p.imports }));
           if (!json) return okOut(rows.length ? rows.map((p) => `- ${p.name}: ${p.description}`).join('\n') : 'No presets.');
           return jsonOut({ command: 'preset', action: 'list', count: rows.length, presets: rows });
         }
         if (action === 'show') {
-          const p = PRESETS.find((x) => x.name === name);
+          const p = presets().find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           if (!json) {
             return okOut([
@@ -579,7 +638,7 @@
           return jsonOut({ command: 'preset', action: 'show', preset: structuredClone(p) });
         }
         if (action === 'apply') {
-          const p = PRESETS.find((x) => x.name === name);
+          const p = presets().find((x) => x.name === name);
           if (!p) return errOut(`no preset "${name}"`);
           // Mirrors the import case: same log lines, same lock updates, same
           // auto-import of requires, same look-alike refusal. A dry run

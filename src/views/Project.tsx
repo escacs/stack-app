@@ -209,25 +209,25 @@ export default function Project(props: { scenario: string }) {
           {(e) => <CliErr text={e()} />}
         </Show>
         {/*
-          Set-up slot. Until per-worker setup lands (part B of #1, waiting on
+          Set-up slot: one line, no heading, so it sits in the normal section
+          rhythm. Until per-worker setup lands (part B of #1, waiting on
           escacs/stack#14 worker preselect and #15 `init --worker`), a project
-          without stack.toml gets the plain init action here, at the top, with
-          a one-line explanation. Part B replaces this block with: working-as
-          pick, start-from preset choice, preview, then `init --worker`.
+          without stack.toml gets the plain init action here, at the top; the
+          explanation lives in its tooltip. Part B replaces the button with:
+          working-as pick, start-from preset choice, preview, then
+          `init --worker`.
         */}
         <Show when={needsInit()}>
-          <h2>set up</h2>
-          <p class="dimtxt">no stack.toml here yet — init creates it so imports have somewhere to live.</p>
-          <p>
+          <div class="setup">
             <button
               class="btn"
-              title="creates stack.toml plus the managed .gitignore block; migrates a legacy stack.lock.json"
+              title="no stack.toml here yet: init creates it so imports have somewhere to live. Also adds the managed .gitignore block and migrates a legacy stack.lock.json"
               disabled={!!pending()}
               onClick={() => void run(init)}
             >
               {busyText('init', 'init stack.toml')}
             </button>
-          </p>
+          </div>
         </Show>
         <Show when={lock().rows.length} fallback={<Show when={!lockError() && !needsInit()}><Empty>(._.) nothing imported</Empty></Show>}>
           <h2>imports</h2>
