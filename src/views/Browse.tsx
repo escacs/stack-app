@@ -154,6 +154,23 @@ const batchDone = (b: BatchState | null) => (b?.phase === 'done' ? b : null);
 /** A batch holds the op lock while it confirms or runs; a summary does not. */
 const batchBusyState = (b: BatchState | null): boolean => b?.phase === 'confirm' || b?.phase === 'running';
 
+/**
+ * In-flight import ops, across navigation: a route change clears the row and
+ * batch UI state but not the CLI call in flight, so the one-op-at-a-time
+ * guard needs a counter that survives both navigation and remounts.
+ * quickImport, runBatch and the entry-page import all hold it while they run.
+ */
+let opsInFlight = 0;
+const [opsBusy, setOpsBusy] = createSignal(false);
+const beginOp = (): void => {
+  opsInFlight += 1;
+  setOpsBusy(true);
+};
+const endOp = (): void => {
+  opsInFlight = Math.max(0, opsInFlight - 1);
+  if (!opsInFlight) setOpsBusy(false);
+};
+
 export default function Browse(props: { scenario: string; segs: string[] }) {
   const [entries, setEntries] = createSignal<JsonEntry[]>([]);
   const [uncommitted, setUncommitted] = createSignal<Set<string>>(new Set());
@@ -320,7 +337,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
    * page, a success refreshes the lock, the report and the catalog.
    */
   async function quickImport(e: JsonEntry, dest?: string): Promise<void> {
-    if (qi()?.phase === 'working' || batchBusyState(batch())) return;
+    if (qi()?.phase === 'working' || batchBusyState(batch()) || opsBusy()) return;
     const c = config();
     if (!c?.project) return;
     if (importedIds().has(e.id) || !e.committed) return;
@@ -341,9 +358,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     setQiAsk(null);
     const gen = qiGen;
     setQi({ id: e.id, phase: 'working' });
+    beginOp();
     try {
       const out = await stackRun('import', importArgs(e.id, dest ?? ''), c.project, c.stackPath);
-      if (!previewFresh(gen, qiGen)) return;
+      if (!previewFresh(gen, qiGen)) return endOp();
       const r = fromStackOut<ImportJson>(out);
       setQi({ id: e.id, phase: 'done', line: quickImportLine(r, e.id), sections: describeImport(r), expanded: false });
       // A single-row bar import delegates here: the row is imported, so it
@@ -360,8 +378,9 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       await refreshReport();
       void load();
       armQiTimer(8000);
+      endOp();
     } catch (err) {
-      if (!previewFresh(gen, qiGen)) return;
+      if (!previewFresh(gen, qiGen)) return endOp();
       const text = errText(err);
       const lookalikes = refusalFiles(text);
       setQi({
@@ -379,6 +398,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         setQiAsk({ id: e.id, value: defaultImportDest(e) });
       }
       armQiTimer(15000);
+      endOp();
     }
   }
 
@@ -471,7 +491,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
    * nothing importable lands straight on the summary.
    */
   function startBatch(label: string, candidates: JsonEntry[]): void {
-    if (qi()?.phase === 'working' || batchBusyState(batch())) return;
+    if (qi()?.phase === 'working' || batchBusyState(batch()) || opsBusy()) return;
     const c = config();
     if (!c?.project || !candidates.length) return;
     clearQiTimer();
@@ -571,10 +591,11 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   async function runBatch(): Promise<void> {
     const b = batchConfirm(batch());
     const c = config();
-    if (!b || b.checking || !c?.project || qi()?.phase === 'working') return;
+    if (!b || b.checking || !c?.project || qi()?.phase === 'working' || opsBusy()) return;
     clearDryTimer();
     dryGen++;
     const gen = qiGen;
+    beginOp();
     const counts: BatchCounts = {
       imported: 0,
       already: b.plan.already.length,
@@ -588,6 +609,8 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     let attempted = 0;
     /** A stale early return still refreshes once anything was attempted. */
     const refreshAfterStale = async (): Promise<void> => {
+      // Every stale exit below funnels through here, so the op ends here too.
+      endOp();
       if (!attempted) return;
       await refreshLock();
       await refreshReport();
@@ -648,6 +671,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     await refreshLock();
     // The lock is authoritative again: landed rows flip through it from here.
     if (!previewFresh(gen, qiGen)) {
+      endOp();
       await refreshReport();
       return;
     }
@@ -656,6 +680,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     void load();
     setSelected(new Set<string>());
     anchor = null;
+    endOp();
     setBatch({ phase: 'done', label: b.label, counts, refusals, expanded: false });
   }
 
@@ -757,10 +782,11 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       const t = ev.target as HTMLElement | null;
       // The search box is ours; other fields (the --to input) keep their keys.
       if (t && t !== inputEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
-      if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return;
       // Buttons and links keep Enter and Space for their own activation.
       if (t && ['BUTTON', 'A'].includes(t.tagName) && (ev.key === 'Enter' || ev.key === ' ')) return;
-      // Shift+arrows extend the selection from the anchor over entry rows.
+      // Shift+arrows extend the selection from the anchor over entry rows;
+      // Ctrl/Cmd makes the extend additive, like Ctrl-click. This runs
+      // before the modifier early return so Ctrl+Shift+arrows reaches it.
       if (ev.shiftKey && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
         ev.preventDefault();
         if (!canSelect()) return;
@@ -775,10 +801,11 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         const to = order[sel()] ?? null;
         if (to) {
           anchor ??= to;
-          editSelection(applyRange(selected(), rangeIds(order, anchor, to), false));
+          editSelection(applyRange(selected(), rangeIds(order, anchor, to), ev.ctrlKey || ev.metaKey));
         }
         return;
       }
+      if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return;
       switch (ev.key) {
         case 'ArrowDown':
           ev.preventDefault();
@@ -851,12 +878,21 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     };
     window.addEventListener('keydown', onKey);
     onCleanup(() => window.removeEventListener('keydown', onKey));
-    // A gutter drag-select ends on any mouse release.
+    // A gutter drag-select ends on release anywhere (even outside the
+    // window), on blur, or on pointer cancel — never stuck selecting.
     const onUp = () => {
       dragging = false;
     };
     window.addEventListener('mouseup', onUp);
-    onCleanup(() => window.removeEventListener('mouseup', onUp));
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onUp);
+    onCleanup(() => {
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onUp);
+    });
   });
 
   // Catalog loads for this source; a project or stack switch reloads, nothing else does.
@@ -1384,7 +1420,7 @@ function EntryRow(
   const asking = (): boolean => props.ask?.id === props.e.id;
   const imported = (): boolean => props.importedIds.has(props.e.id) || props.landed;
   const opBusy = (): boolean =>
-    (props.qi?.phase === 'working' && props.qi.id !== props.e.id) || props.batchBusy;
+    (props.qi?.phase === 'working' && props.qi.id !== props.e.id) || props.batchBusy || opsBusy();
   const importTitle = (): string =>
     needsImportDest(props.e)
       ? 'import to a folder you choose'
@@ -1898,9 +1934,10 @@ function EntryDetail(props: {
 
   async function doImport() {
     const c = config();
-    if (!c?.project) return;
+    if (!c?.project || pending() || opsBusy()) return;
     const dest = to().trim();
     setPending(true);
+    beginOp();
     setSections(null);
     setFailed(null);
     try {
@@ -1915,6 +1952,7 @@ function EntryDetail(props: {
       setFailed(errText(err));
     } finally {
       setPending(false);
+      endOp();
     }
   }
 
@@ -2026,8 +2064,8 @@ function EntryDetail(props: {
                     aria-label="import destination inside the project"
                     size={24}
                   />{' '}
-                  <button class="btn" disabled={pending()} onClick={() => void doImport()}>
-                    {pending() ? 'importing' : 'import'}
+                  <button class="btn" disabled={pending() || opsBusy()} onClick={() => void doImport()}>
+                    {pending() ? 'importing' : opsBusy() ? 'working' : 'import'}
                   </button>
                 </p>
               </Show>

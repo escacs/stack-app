@@ -377,8 +377,9 @@ Two ways to import several entries at once:
   attempted; already-imported and `not-committed` rows are left out.
 - Multi-select: press the gutter at a row's left end (or `Space` on the
   cursor row) and more rows — `Shift`-click and `Ctrl`-click work on the
-  rows too, `Shift`+arrows extend from the keyboard, and a gutter press
-  can be dragged across rows. Selected rows carry a `*` in the gutter.
+  rows too, `Shift`+arrows extend from the keyboard (`Ctrl`+`Shift`+arrows
+  extend additively), and a gutter press can be dragged across rows.
+  Selected rows carry a `*` in the gutter.
   `a` selects every not-imported row in the list (whenever a list is
   showing, no cursor needed — except while typing in a text field). A
   quiet `N selected [import] [clear]` bar sits under the prompt while
