@@ -4,15 +4,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   CATALOG_NAME,
+  applyRange,
   buildIndex,
   byKindOrder,
   createFetchCache,
   createLimiter,
   crumbParts,
+  notImportedIds,
   previewKey,
+  rangeIds,
   resolveRoute,
   sameRoute,
   sourceKey,
+  toggleSelected,
   type Route,
 } from './browseData';
 import type { JsonEntry } from './json';
@@ -143,6 +147,40 @@ describe('buildIndex', () => {
     const idx = buildIndex([]);
     expect(idx.byId.size).toBe(0);
     expect(idx.citedBy.size).toBe(0);
+  });
+});
+
+describe('selection model', () => {
+  it('toggles one id without touching the input set', () => {
+    const prev = new Set(['a']);
+    expect([...toggleSelected(prev, 'b')].sort()).toEqual(['a', 'b']);
+    expect([...toggleSelected(prev, 'a')]).toEqual([]);
+    expect([...prev]).toEqual(['a']);
+  });
+
+  it('ranges inclusively between anchor and focus, either direction', () => {
+    const order = ['a', 'b', 'c', 'd'];
+    expect(rangeIds(order, 'b', 'd')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(order, 'd', 'b')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(order, 'c', 'c')).toEqual(['c']);
+  });
+
+  it('a missing anchor or focus selects just the focus row, or nothing', () => {
+    const order = ['a', 'b', 'c'];
+    expect(rangeIds(order, null, 'b')).toEqual(['b']);
+    expect(rangeIds(order, 'gone', 'b')).toEqual(['b']);
+    expect(rangeIds(order, 'a', 'gone')).toEqual([]);
+  });
+
+  it('applies a range by replace, or by union when additive', () => {
+    expect([...applyRange(new Set(['x']), ['a', 'b'], false)].sort()).toEqual(['a', 'b']);
+    expect([...applyRange(new Set(['x']), ['a', 'b'], true)].sort()).toEqual(['a', 'b', 'x']);
+  });
+
+  it('`a` picks every not-imported row in list order, committed or not', () => {
+    const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(notImportedIds(rows, new Set(['b']))).toEqual(['a', 'c']);
+    expect(notImportedIds(rows, new Set())).toEqual(['a', 'b', 'c']);
   });
 });
 

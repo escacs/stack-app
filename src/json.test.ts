@@ -3,6 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   CliError,
+  batchConfirmText,
+  batchDest,
+  batchSummary,
   cliText,
   describeImport,
   describeInit,
@@ -17,9 +20,11 @@ import {
   fromStackOut,
   importArgs,
   importDestHint,
+  importDryRunArgs,
   matchPresets,
   needsImportDest,
   parseJsonOut,
+  planBatch,
   presetApplyArgs,
   presetCountText,
   presetCountTitle,
@@ -268,6 +273,56 @@ describe('quick import destinations', () => {
   it('prefills components with src/components/<name>, nothing otherwise', () => {
     expect(importDestHint({ kind: 'component', name: 'button' })).toBe('src/components/button');
     expect(importDestHint({ kind: 'asset', name: 'escacs-mark' })).toBeNull();
+  });
+});
+
+describe('batch planning', () => {
+  const skill = (id: string): JsonEntry => entry(id);
+  const comp = (id: string): JsonEntry => ({ ...entry(id), kind: 'component', usage: 'copy' });
+
+  it('splits candidates into ready, need-dest, already and unimportable', () => {
+    const p = planBatch(
+      [skill('skills/a'), comp('components/x/b'), skill('skills/c'), { ...skill('skills/d'), committed: false }],
+      new Set(['skills/c']),
+    );
+    expect(p.ready.map((e) => e.id)).toEqual(['skills/a']);
+    expect(p.needDest.map((e) => e.id)).toEqual(['components/x/b']);
+    expect(p.already).toEqual(['skills/c']);
+    expect(p.unimportable).toEqual(['skills/d']);
+  });
+
+  it('an already-imported row counts as already even when not committed', () => {
+    const p = planBatch([{ ...skill('skills/a'), committed: false }], new Set(['skills/a']));
+    expect(p.already).toEqual(['skills/a']);
+    expect(p.unimportable).toEqual([]);
+  });
+
+  it('dry-run args mirror import args with --dry-run before --json', () => {
+    expect(importDryRunArgs('skills/a', '')).toEqual(['skills/a', '--dry-run', '--json']);
+    expect(importDryRunArgs('skills/a', 'vendor')).toEqual(['skills/a', '--to', 'vendor', '--dry-run', '--json']);
+  });
+
+  it('a shared base becomes <base>/<name>; an empty base skips', () => {
+    expect(batchDest('src/components', 'button')).toBe('src/components/button');
+    expect(batchDest('src/components/', 'button')).toBe('src/components/button');
+    expect(batchDest('  ', 'button')).toBe('');
+  });
+
+  it('the confirm line names the count, needs-dest, collisions and skips', () => {
+    expect(batchConfirmText({ count: 5, needDest: 0, conflicts: 0, skipped: 0 })).toBe('import 5');
+    expect(batchConfirmText({ count: 5, needDest: 2, conflicts: 1, skipped: 1 })).toBe(
+      'import 5 · 2 need a destination · 1 would collide · 1 skipped',
+    );
+  });
+
+  it('the summary always names the imported count, then the nonzero buckets', () => {
+    expect(batchSummary({ imported: 5, already: 1, refused: 1, skipped: 0, stopped: false })).toBe(
+      'imported 5 · 1 already here · 1 refused',
+    );
+    expect(batchSummary({ imported: 0, already: 0, refused: 2, skipped: 1, stopped: true })).toBe(
+      'imported 0 · 2 refused · 1 skipped · stopped',
+    );
+    expect(batchSummary({ imported: 3, already: 0, refused: 0, skipped: 0, stopped: false })).toBe('imported 3');
   });
 });
 

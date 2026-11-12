@@ -224,8 +224,12 @@ is always shown, dim while idle, and brightens while the row is hovered,
 focused or under the cursor. One click imports with the default
 destination, without leaving the list. Rows this project already imported
 show `(imported)` instead; rows that cannot be imported (`not-committed`)
-show nothing. A dim `↑↓ move · i import` line under each list names the
-list keys.
+show nothing. A dim key line under each list names the list keys.
+
+Above every kind list, and in every component library heading, an
+`[import all N]` button imports the whole list at once (see
+[batch import](#batch-import)). Search results get multi-select but no
+import-all.
 
 ### all
 
@@ -364,15 +368,57 @@ inline field on the row itself, prefilled with the convention
 page's import section keeps working as before, including an empty `--to`
 for the CLI default.
 
+### Batch import
+
+Two ways to import several entries at once:
+
+- `[import all N]` above a kind list, or in a component library heading,
+  imports every not-imported entry below it. `N` counts what would be
+  attempted; already-imported and `not-committed` rows are left out.
+- Multi-select: press the gutter at a row's left end (or `Space` on the
+  cursor row) and more rows — `Shift`-click and `Ctrl`-click work on the
+  rows too, `Shift`+arrows extend from the keyboard, and a gutter press
+  can be dragged across rows. Selected rows carry a `*` in the gutter.
+  `a` selects every not-imported row in the list (with the cursor on the
+  list, like `i`). A quiet `N selected [import] [clear]` bar sits under
+  the prompt while anything is selected.
+
+Either way, more than one entry gets a dry-run confirm line first —
+nothing is written until it is confirmed:
+
+```
+components/batch: import 7 · 1 would collide [details] to: [src/components] [import] [cancel]
+```
+
+The line names the count, entries that would collide (dry-run first, so
+conflicts show before anything is written), and entries skipped
+(already here, `not-committed`). Entries needing a destination share one
+`to:` base — each lands in `<base>/<name>` — prefilled with
+`src/components` for component batches; empty skips them. One entry
+imports straight away, like its row button.
+
+The run imports the entries one at a time, with each result inline on
+its row, and ends with one summary line:
+
+```
+components/batch: imported 6 · 1 refused [details]
+```
+
+`[details]` lists every refusal with its look-alike files or error.
+`[cancel]` stops after the current entry. Only one import — row or
+batch — runs at a time.
+
 ### Keys in Browse
 
 | key | does |
 |---|---|
 | `↑` `↓` | move the cursor over rows: home rows, list rows, file tree |
+| `Shift`+`↑` `↓` | extend the selection from the anchor row (lists only) |
 | `Enter` | open the cursor row. With a search and no cursor, open the first result |
 | `i` | import the cursor row in place (lists only; never inside a text field) |
-| `Escape` | clear the search. Otherwise go up one level: file → entry → kind → home |
-| `Space` | scroll down about 80% of a page, when the search box is empty |
+| `Space` | select the cursor row (lists only). With no cursor row, scroll down about 80% of a page when the search box is empty |
+| `a` | select every not-imported row in the list (needs the cursor on the list, like `i`; otherwise types into the search) |
+| `Escape` | cancel a batch confirm or run, dismiss a summary, clear the selection, clear the search, or go up one level, in that order |
 | letter or digit | focus the search box and type into it |
 
 Clicking a row or link does the same as moving to it and pressing `Enter`.

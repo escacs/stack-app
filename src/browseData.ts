@@ -224,3 +224,49 @@ export function whenVisible(el: Element, cb: () => void): () => void {
 
 /** Module-wide preview cache: data URLs (or null when the file has no image bytes). */
 export const previewCache = createFetchCache<string | null>(3);
+
+// ------------------------------------------------------------------ selection
+
+/**
+ * Toggle one id in a selection. Returns a new set; the input is untouched,
+ * so a Solid signal holding it sees a changed reference.
+ */
+export function toggleSelected(prev: Set<string>, id: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/**
+ * Inclusive id range between anchor and focus in list order, either
+ * direction. A missing anchor (or one no longer listed) selects just the
+ * focus row; an unlisted focus selects nothing.
+ */
+export function rangeIds(ordered: string[], anchor: string | null, focus: string): string[] {
+  const f = ordered.indexOf(focus);
+  if (f < 0) return [];
+  const a = anchor === null ? -1 : ordered.indexOf(anchor);
+  if (a < 0) return [focus];
+  const [lo, hi] = a <= f ? [a, f] : [f, a];
+  return ordered.slice(lo, hi + 1);
+}
+
+/**
+ * Apply a range to a selection: replace it, or union when additive (Ctrl
+ * held). Returns a new set.
+ */
+export function applyRange(prev: Set<string>, range: string[], additive: boolean): Set<string> {
+  const next = additive ? new Set(prev) : new Set<string>();
+  for (const id of range) next.add(id);
+  return next;
+}
+
+/**
+ * Ids the `a` key selects: every listed row not imported yet, in list
+ * order. Not-committed rows stay selectable: the batch plan skips them with
+ * a count instead of refusing one by one.
+ */
+export function notImportedIds(entries: Pick<JsonEntry, 'id'>[], imported: Set<string>): string[] {
+  return entries.filter((e) => !imported.has(e.id)).map((e) => e.id);
+}
