@@ -6,12 +6,13 @@
 // <<<<<<< markers, remove keeps edited files, sync only restores missing
 // files, adopt never overwrites.
 import { For, Show, createEffect, createMemo, createSignal, on, onMount, untrack } from 'solid-js';
-import { errText, projectFolders, stackRun, type StackOut } from '../bridge';
+import { errText, pickAdoptFolder, projectFolders, stackRun, type StackOut } from '../bridge';
 import {
   adoptArgs,
   adoptCountText,
   adoptDryRunArgs,
   conflictsFor,
+  inferAdoptCandidates,
   mapPooled,
   matchAdoptCandidates,
   type AdoptCandidate,
@@ -68,18 +69,28 @@ export default function Project(props: { scenario: string }) {
   // after the bump names pre-op lock state and must be dropped, not shown.
   const [opSeq, setOpSeq] = createSignal(0);
   const [lookalikes, setLookalikes] = createSignal<string[]>([]);
-  const [otherOpen, setOtherOpen] = createSignal(false);
-  const [otherId, setOtherId] = createSignal('');
-  const [otherTo, setOtherTo] = createSignal('');
-  let otherRef: HTMLInputElement | undefined;
+  // Adopt picker: a folder chosen in the native dialog, confined to the
+  // project by the shell. The entry is inferred from the folder name; when
+  // nothing matches, a catalog-autocomplete id field is the last resort.
+  const [pickOpen, setPickOpen] = createSignal(false);
+  const [picking, setPicking] = createSignal(false);
+  const [picked, setPicked] = createSignal<string | null>(null);
+  const [pickError, setPickError] = createSignal<string | null>(null);
+  const [manualId, setManualId] = createSignal('');
+  let manualRef: HTMLInputElement | undefined;
   // Adopt suggestions: the catalog plus the project's folders, matched by
   // name (see adopt.ts). Hints arrive later, one dry run per candidate.
   const [entries, setEntries] = createSignal<JsonEntry[]>([]);
   const [folders, setFolders] = createSignal<string[]>([]);
   const [hints, setHints] = createSignal<Record<string, 'identical' | 'differs'>>({});
+  // Dry-run hints for the picked folder, keyed per candidate: the same id
+  // at another destination can differ, so the auto-list hints don't apply.
+  const [pickedHints, setPickedHints] = createSignal<Record<string, 'identical' | 'differs'>>({});
   let adoptGen = 0;
   let hintGen = 0;
   let hintedKey = '';
+  let pickedHintGen = 0;
+  let pickedHintedKey = '';
 
   onMount(() => void refreshLock());
 
@@ -89,13 +100,16 @@ export default function Project(props: { scenario: string }) {
       () => config()?.project ?? null,
       () => {
         clearOutput();
-        setOtherOpen(false);
-        setOtherId('');
-        setOtherTo('');
+        setPickOpen(false);
+        setPicked(null);
+        setPickError(null);
+        setManualId('');
         setEntries([]);
         setFolders([]);
         setHints({});
+        setPickedHints({});
         hintedKey = '';
+        pickedHintedKey = '';
       },
       { defer: true },
     ),
@@ -117,6 +131,20 @@ export default function Project(props: { scenario: string }) {
       .filter((e) => e.committed && !ids.has(e.id))
       .map((e) => e.id);
   });
+  // What the picked folder could be: re-inferred when the catalog or the
+  // lock lands, so a pick before the list loads still resolves.
+  const pickedCands = createMemo((): AdoptCandidate[] => {
+    const folder = picked();
+    if (!folder) return [];
+    const ids = new Set(lock().rows.map((r) => r.id));
+    return inferAdoptCandidates(folder, entries(), ids);
+  });
+  const pickedKey = createMemo(() =>
+    pickedCands()
+      .map((c) => `${c.folder}|${c.id}|${c.to ?? ''}`)
+      .join('\n'),
+  );
+  const pickedHintKey = (c: AdoptCandidate): string => `${c.folder}|${c.id}|${c.to ?? ''}`;
 
   // Stale-while-revalidate catalog (shared with Browse through `catalogs`)
   // plus a fresh folder listing; a failure just means no suggestions.
@@ -186,6 +214,30 @@ export default function Project(props: { scenario: string }) {
     setHints(found);
   }
 
+  // Same dry-run probe for the picked folder, keyed per candidate.
+  async function loadPickedHints(key: string, busy: string | null): Promise<void> {
+    if (busy || !key || key === pickedHintedKey) return;
+    const gen = ++pickedHintGen;
+    const c = config();
+    if (!c?.project) return;
+    const proj = c.project;
+    const stackPath = c.stackPath;
+    const found: Record<string, 'identical' | 'differs'> = {};
+    await mapPooled(pickedCands(), 4, async (cand) => {
+      try {
+        const out = await stackRun('import', adoptDryRunArgs(cand), proj, stackPath);
+        const data = fromStackOut<ImportDryRunJson>(out);
+        const mine = conflictsFor(data.conflicts ?? [], cand.to ?? cand.folder);
+        found[pickedHintKey(cand)] = mine.length ? 'differs' : 'identical';
+      } catch {
+        // No hint for this one; the adopt button still works.
+      }
+    });
+    if (gen !== pickedHintGen) return;
+    pickedHintedKey = key;
+    setPickedHints(found);
+  }
+
   // Suggestions load for this source; a project or stack switch reloads.
   createEffect(() => {
     sourceKey(config());
@@ -196,6 +248,12 @@ export default function Project(props: { scenario: string }) {
     const key = candidatesKey();
     const busy = pending();
     untrack(() => void loadHints(key, busy));
+  });
+
+  createEffect(() => {
+    const key = pickedKey();
+    const busy = pending();
+    untrack(() => void loadPickedHints(key, busy));
   });
 
   function clearOutput() {
@@ -295,29 +353,71 @@ export default function Project(props: { scenario: string }) {
     describe: decode<PresetApplyJson>(describePresetApply),
   });
 
-  function toggleOther() {
-    const open = !otherOpen();
-    setOtherOpen(open);
-    if (open) queueMicrotask(() => otherRef?.focus());
+  function closePick() {
+    setPickOpen(false);
+    setPicked(null);
+    setPickError(null);
+    setManualId('');
+    setPickedHints({});
+    pickedHintedKey = '';
   }
 
-  function submitOther() {
-    const id = otherId().trim();
-    if (!id || pending()) return;
-    // On success the form closes cleared, leaving the shared output above;
+  async function pickFlow(): Promise<void> {
+    const c = config();
+    if (!c?.project || pending() || picking()) return;
+    setPicking(true);
+    setPickError(null);
+    try {
+      const rel = await pickAdoptFolder(c.project);
+      // Cancel stays quiet: no panel, nothing cleared.
+      if (rel == null) return;
+      setPicked(rel);
+      setManualId('');
+      setPickedHints({});
+      pickedHintedKey = '';
+      setPickOpen(true);
+      // No match means the id field is the next step; focus it once shown.
+      if (!inferAdoptCandidates(rel, entries(), new Set(lock().rows.map((r) => r.id))).length) {
+        queueMicrotask(() => manualRef?.focus());
+      }
+    } catch (err) {
+      setPicked(null);
+      setPickError(errText(err));
+      setPickOpen(true);
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function submitManual() {
+    const id = manualId().trim();
+    const folder = picked();
+    if (!id || !folder || pending()) return;
+    // On success the panel closes cleared, leaving the shared output above;
     // on failure it stays open so the id can be fixed and retried.
     void run({
       key: 'adopt',
       label: `adopt ${id}`,
       sub: 'import',
-      args: importArgs(id, otherTo()),
+      args: importArgs(id, folder),
       describe: decode<ImportJson>(describeImport),
     }).then((ok) => {
-      if (ok) {
-        setOtherId('');
-        setOtherTo('');
-        setOtherOpen(false);
-      }
+      if (ok) closePick();
+    });
+  }
+
+  function adoptPicked(c: AdoptCandidate) {
+    if (pending()) return;
+    // Same one-op runner as the auto list; a differing pick refuses with the
+    // look-alike list and the panel stays open for another try.
+    void run({
+      key: `adopt ${c.id}`,
+      label: `adopt ${c.id}`,
+      sub: 'import',
+      args: adoptArgs(c),
+      describe: decode<ImportJson>(describeImport),
+    }).then((ok) => {
+      if (ok) closePick();
     });
   }
 
@@ -367,7 +467,8 @@ export default function Project(props: { scenario: string }) {
         {/*
           Adopt sits next to the set-up slot: both are about things not in
           stack.toml yet. With candidates, one line each with its adopt
-          button; with none, only the quiet adopt other… link for the manual case.
+          button; with none, only the quiet pick a folder… link. The picker
+          resolves the entry from the folder name, so no id is typed.
         */}
         <div class="adopt-block">
           <Show when={candidates().length}>
@@ -406,49 +507,119 @@ export default function Project(props: { scenario: string }) {
           </Show>
           <button
             class="linklike"
-            title="adopt a folder the list missed: name the entry and the folder by hand"
-            aria-expanded={otherOpen()}
-            onClick={toggleOther}
+            title="pick a folder in this project to adopt: the entry is inferred from the folder name"
+            aria-expanded={pickOpen()}
+            aria-label="pick a folder to adopt"
+            disabled={!!pending() || picking()}
+            onClick={() => void pickFlow()}
           >
-            adopt other…
+            {picking() ? 'picking…' : 'pick a folder…'}
           </button>
-          <Show when={otherOpen()}>
-            <form
-              class="adopt"
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitOther();
-              }}
-            >
-              <input
-                type="text"
-                ref={(el) => (otherRef = el)}
-                value={otherId()}
-                onInput={(e) => setOtherId(e.currentTarget.value)}
-                placeholder="entry id, e.g. skills/file-pr"
-                aria-label="entry id to adopt"
-                list="adopt-id-list"
-                size={30}
-              />
-              <datalist id="adopt-id-list">
-                <For each={suggestIds()}>{(id) => <option value={id} />}</For>
-              </datalist>
-              <input
-                type="text"
-                value={otherTo()}
-                onInput={(e) => setOtherTo(e.currentTarget.value)}
-                placeholder="folder in this project (optional)"
-                aria-label="folder in this project"
-                size={30}
-              />
-              <button
-                type="submit"
-                class="btn"
-                disabled={!!pending() || !otherId().trim()}
-              >
-                {busyText('adopt', 'adopt')}
-              </button>
-            </form>
+          <Show when={pickOpen()}>
+            <div class="adopt-picked">
+            <Show when={pickError()}>
+              {(e) => <p class="conflict" role="alert">{e()}</p>}
+            </Show>
+            <Show when={picked() && !pickError()}>
+              <Show when={pickedCands().length === 1 ? pickedCands()[0] : undefined}>
+                {(cand) => {
+                  const hint = () => pickedHints()[pickedHintKey(cand())];
+                  return (
+                    <div class="adopt-row">
+                      <span
+                        title={
+                          cand().to ? `adopts into ${cand().to}` : 'adopts into its default place'
+                        }
+                      >
+                        {cand().folder} → {cand().id}
+                      </span>
+                      <Show when={hint()}>
+                        <span class="dimtxt">({hint()})</span>
+                      </Show>
+                      <button
+                        class="btn"
+                        title={
+                          hint() === 'differs'
+                            ? 'the files differ, so this lists them and writes nothing'
+                            : 'records these files in stack.toml without changing them'
+                        }
+                        disabled={!!pending()}
+                        onClick={() => adoptPicked(cand())}
+                      >
+                        {busyText(`adopt ${cand().id}`, 'adopt')}
+                      </button>
+                    </div>
+                  );
+                }}
+              </Show>
+              <Show when={pickedCands().length > 1}>
+                <p class="dimtxt">several entries match this folder:</p>
+                <div class="adopt-list">
+                  <For each={pickedCands()}>
+                    {(cand) => {
+                      const hint = () => pickedHints()[pickedHintKey(cand)];
+                      return (
+                        <div class="adopt-row">
+                          <span title={cand.to ? `adopts into ${cand.to}` : 'adopts into its default place'}>
+                            {cand.folder} → {cand.id}
+                          </span>
+                          <Show when={hint()}>
+                            <span class="dimtxt">({hint()})</span>
+                          </Show>
+                          <button
+                            class="btn"
+                            title={
+                              hint() === 'differs'
+                                ? 'the files differ, so this lists them and writes nothing'
+                                : 'records these files in stack.toml without changing them'
+                            }
+                            disabled={!!pending()}
+                            onClick={() => adoptPicked(cand)}
+                          >
+                            {busyText(`adopt ${cand.id}`, 'adopt')}
+                          </button>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+              <Show when={picked() && pickedCands().length === 0}>
+                <p class="dimtxt">no stack entry matches this folder</p>
+                <form
+                  class="adopt"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitManual();
+                  }}
+                >
+                  <input
+                    type="text"
+                    ref={(el) => (manualRef = el)}
+                    value={manualId()}
+                    onInput={(e) => setManualId(e.currentTarget.value)}
+                    placeholder="entry id, e.g. skills/file-pr"
+                    aria-label="entry id to adopt"
+                    list="adopt-id-list"
+                    size={30}
+                  />
+                  <datalist id="adopt-id-list">
+                    <For each={suggestIds()}>{(id) => <option value={id} />}</For>
+                  </datalist>
+                  <button
+                    type="submit"
+                    class="btn"
+                    disabled={!!pending() || !manualId().trim()}
+                  >
+                    {busyText('adopt', 'adopt')}
+                  </button>
+                </form>
+              </Show>
+            </Show>
+            <button class="linklike" title="dismiss this pick" onClick={closePick}>
+              close
+            </button>
+            </div>
           </Show>
         </div>
         <Show when={lock().rows.length} fallback={<Show when={!lockError() && !needsInit()}><Empty>(._.) nothing imported</Empty></Show>}>

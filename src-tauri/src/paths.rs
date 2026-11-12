@@ -28,6 +28,37 @@ pub fn confine_existing(root: &Path, path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// Express an existing absolute `path` as a project-relative posix path
+/// inside `root`. Both sides are canonicalized, so `..` and symlinks that
+/// escape the project are rejected. The project dir itself is rejected: the
+/// adopt picker needs a folder *inside* the project, not the project root.
+pub fn relative_inside(root: &Path, path: &Path) -> Result<String, String> {
+    let root = canonical_dir(root, "resolve root")?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|e| format!("resolve '{}': {e}", path.display()))?;
+    if !resolved.is_dir() {
+        return Err("pick a folder inside the project".to_string());
+    }
+    let rel = resolved
+        .strip_prefix(&root)
+        .map_err(|_| "folder is outside this project".to_string())?;
+    if rel.as_os_str().is_empty() {
+        return Err("pick a folder inside the project, not the project itself".to_string());
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(c) => parts.push(c.to_string_lossy().into_owned()),
+            _ => return Err("folder is outside this project".to_string()),
+        }
+    }
+    if parts.is_empty() {
+        return Err("pick a folder inside the project, not the project itself".to_string());
+    }
+    Ok(parts.join("/"))
+}
+
 /// Join a project-relative `user` path onto `root` without requiring it to
 /// exist (for `--to` targets). Absolute paths and lexical `..` escapes are
 /// rejected; then the longest existing prefix is canonicalized to catch
@@ -128,6 +159,44 @@ mod tests {
         let inside = root.join("y.txt");
         std::fs::write(&inside, "y").unwrap();
         assert!(confine_existing(&root, &inside).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn relative_inside_returns_posix_relative() {
+        let root = tmp_root("relin");
+        std::fs::create_dir_all(root.join(".agents/skills/file-pr")).unwrap();
+        let rel = relative_inside(&root, &root.join(".agents/skills/file-pr")).unwrap();
+        assert_eq!(rel, ".agents/skills/file-pr");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn relative_inside_rejects_outside_and_root() {
+        let root = tmp_root("relout");
+        let outside = tmp_root("relout-out");
+        std::fs::create_dir_all(outside.join("elsewhere")).unwrap();
+        assert_eq!(
+            relative_inside(&root, &outside.join("elsewhere")).unwrap_err(),
+            "folder is outside this project"
+        );
+        assert!(relative_inside(&root, &root).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_inside_rejects_symlink_escape() {
+        let root = tmp_root("rellink");
+        let outside = tmp_root("rellink-out");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("evil")).unwrap();
+        assert_eq!(
+            relative_inside(&root, &root.join("evil")).unwrap_err(),
+            "folder is outside this project"
+        );
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
     }

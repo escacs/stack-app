@@ -155,6 +155,46 @@ export function matchAdoptCandidates(
   return [...found.values()].sort((a, b) => a.folder.localeCompare(b.folder));
 }
 
+/**
+ * Infer which entries a picked folder could be, for the adopt picker. First
+ * the placed-folder rules from {@link matchAdoptCandidates} (a pick inside
+ * the known roots resolves exactly like the auto-detected list); otherwise
+ * the folder's own name against catalog names (basename, plus a trailing
+ * `/<id>` suffix so `vendor/skills/file-pr` still finds its entry).
+ * Imported ids and uncommitted entries never match. Sorted by id; several
+ * matches mean the UI shows a short choice list.
+ *
+ * Name-only on purpose: `list --json` carries no file lists, so a content
+ * fingerprint would need one `show` per entry. The dry-run hint after the
+ * pick confirms the content instead (identical/differs).
+ */
+export function inferAdoptCandidates(
+  folder: string,
+  entries: JsonEntry[],
+  imported: Set<string>,
+): AdoptCandidate[] {
+  const placed = matchAdoptCandidates([folder], entries, imported);
+  if (placed.length) return placed;
+  const cleaned = cleanFolder(folder);
+  if (!cleaned) return [];
+  const base = cleaned.split('/').pop()?.toLowerCase() ?? '';
+  const low = cleaned.toLowerCase();
+  const matches = entries.filter((e) => {
+    if (!e.committed || imported.has(e.id)) return false;
+    if (e.name.toLowerCase() === base) return true;
+    const id = e.id.toLowerCase();
+    return low === id || low.endsWith(`/${id}`);
+  });
+  return matches
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((e) => ({
+      folder: cleaned,
+      id: e.id,
+      to: cleaned === defaultDestFor(e) ? null : cleaned,
+    }));
+}
+
 /** Heading count: `1 look-alike entry` / `3 look-alike entries`. */
 export function adoptCountText(n: number): string {
   return n === 1 ? '1 look-alike entry' : `${n} look-alike entries`;

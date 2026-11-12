@@ -100,6 +100,7 @@ verbatim, they are written for users. The typed wrappers live in
 | Command | Args | Returns |
 |---|---|---|
 | `pick_folder` | — | `string \| null` (null = cancelled) |
+| `pick_adopt_folder` | `{ projectDir: string }` | project-relative `string \| null` (null = cancelled; outside picks rejected) |
 | `get_config` | — | `AppConfig` |
 | `save_config` | `{ config: AppConfig }` | `null` |
 | `add_recent_project` | `{ path: string }` | `AppConfig` (updated) |

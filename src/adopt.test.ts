@@ -1,5 +1,6 @@
 // Tests for the pure adopt helpers (src/adopt.ts): default destinations,
-// folder-to-entry matching, dry-run conflict attribution and arg shapes.
+// folder-to-entry matching, picker inference, dry-run conflict attribution
+// and arg shapes.
 import { describe, expect, it } from 'vitest';
 import {
   adoptArgs,
@@ -7,6 +8,7 @@ import {
   adoptDryRunArgs,
   conflictsFor,
   defaultDestFor,
+  inferAdoptCandidates,
   mapPooled,
   matchAdoptCandidates,
 } from './adopt';
@@ -155,6 +157,52 @@ describe('matchAdoptCandidates', () => {
       { folder: '.agents/skills/file-pr', id: 'skills/file-pr', to: null },
       { folder: '.stack/workers/mel', id: 'workers/mel', to: null },
     ]);
+  });
+});
+
+describe('inferAdoptCandidates', () => {
+  it('resolves placed folders exactly like the auto-detected list', () => {
+    expect(inferAdoptCandidates('.agents/skills/file-pr', CATALOG, new Set())).toEqual([
+      { folder: '.agents/skills/file-pr', id: 'skills/file-pr', to: null },
+    ]);
+    expect(inferAdoptCandidates('.stack/systems/engineering-conventions', CATALOG, new Set())).toEqual([
+      {
+        folder: '.stack/systems/engineering-conventions',
+        id: 'systems/engineering-conventions',
+        to: null,
+      },
+    ]);
+  });
+  it('matches an arbitrary folder by its own name, with --to', () => {
+    expect(inferAdoptCandidates('vendor/file-pr', CATALOG, new Set())).toEqual([
+      { folder: 'vendor/file-pr', id: 'skills/file-pr', to: 'vendor/file-pr' },
+    ]);
+    expect(inferAdoptCandidates('handmade/engineering-conventions', CATALOG, new Set())).toEqual([
+      {
+        folder: 'handmade/engineering-conventions',
+        id: 'systems/engineering-conventions',
+        to: 'handmade/engineering-conventions',
+      },
+    ]);
+  });
+  it('matches a trailing /<id> suffix', () => {
+    expect(inferAdoptCandidates('vendor/skills/file-pr', CATALOG, new Set())).toEqual([
+      { folder: 'vendor/skills/file-pr', id: 'skills/file-pr', to: 'vendor/skills/file-pr' },
+    ]);
+  });
+  it('lists every same-named entry, sorted, for a choice list', () => {
+    expect(inferAdoptCandidates('handmade/button', CATALOG, new Set())).toEqual([
+      { folder: 'handmade/button', id: 'components/legacy/button', to: 'handmade/button' },
+      { folder: 'handmade/button', id: 'components/react/button', to: 'handmade/button' },
+    ]);
+  });
+  it('skips imported ids and uncommitted entries, and rejects unsafe paths', () => {
+    expect(inferAdoptCandidates('vendor/file-pr', CATALOG, new Set(['skills/file-pr']))).toEqual([]);
+    expect(inferAdoptCandidates('vendor/draft-entry', CATALOG, new Set())).toEqual([]);
+    expect(inferAdoptCandidates('vendor/my-own-thing', CATALOG, new Set())).toEqual([]);
+    for (const bad of ['', '.', '..', '/abs/path', 'a/../escape']) {
+      expect(inferAdoptCandidates(bad, CATALOG, new Set())).toEqual([]);
+    }
   });
 });
 

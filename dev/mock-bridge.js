@@ -118,6 +118,9 @@
 
   const handlers = {
     pick_folder: async () => "/home/dev/projects/folio",
+    // Adopt picker: the minimal mock has no catalog, so a pick would never
+    // resolve; cancel quietly like a dismissed dialog.
+    pick_adopt_folder: async () => null,
     get_config: async () => structuredClone(fx.config),
     save_config: async ({ config }) => {
       fx.config = structuredClone(config);
