@@ -625,8 +625,12 @@ opens the project page, as an alias.
 | `adopt1` | one adoptable folder next to `init stack.toml` |
 | `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
 | `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |
-| `bad-stack` | the stack checkout setup screen |
+| `bad-stack` | the stack checkout setup screen; get stack clones and the gate lifts |
 | `no-node` | the setup screen with node missing |
+| `no-auth` | the setup screen with no GitHub auth: get stack fails with the one actionable error |
+| `no-cli` | a valid stack whose command is not linked: the quiet [add stack command] line |
+| `cli-foreign` | the quiet line when something else owns the `stack` name (no offer) |
+| `no-path` | the quiet line when the bin dir is off PATH (no offer) |
 
 A `+update-available` or `+update-error` suffix on any scenario drives the
 footer updater fixture: `#populated+update-available,/project` offers the

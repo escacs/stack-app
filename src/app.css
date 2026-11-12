@@ -11,7 +11,7 @@ body { width: min(100%, 112ch); }
 #shell main { flex: 1 0 auto; animation-fill-mode: backwards; }
 
 /* native feel: chrome is not text -------------------------------------- */
-html { overscroll-behavior: none; scroll-behavior: smooth; }
+html { overscroll-behavior: none; }
 
 /* ascii scrollbar: square block thumb on a dotted track ------------------ */
 /* Standard props make Chromium/WebKit ignore ::-webkit-scrollbar-*, so they

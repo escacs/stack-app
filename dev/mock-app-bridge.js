@@ -11,7 +11,8 @@
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
 // imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
 // adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs),
-// quickimport (one of each inline-import row state).
+// quickimport (one of each inline-import row state), no-auth, no-cli,
+// cli-foreign, cli-elsewhere, no-path.
 // A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
@@ -577,6 +578,7 @@
       },
     }),
     // First-run gate: nothing validates, the app must show StackSetup.
+    // get stack clones and the gate lifts (see the provision_stack handler).
     'bad-stack': () => ({
       config: { ...baseConfig, stackPath: null, worker: null, project: null },
       node: { ok: true, version: 'v22.14.0', major: 22, error: null },
@@ -584,7 +586,7 @@
         path: '', valid: false, source: 'missing',
         git: false, cli: false,
         node: { ok: true, version: 'v22.14.0', major: 22, error: null },
-        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK to it.',
+        error: 'no escacs/stack checkout found: looked upward from the app, its install folder and the working folder for tools/stack/cli.mjs. Press get stack, or pick your stack clone (the folder containing tools/stack/cli.mjs), or set ESCACS_STACK.',
       },
       report: (path) => ({ path, valid: true, markers: [], errors: [] }),
       lock: [],
@@ -592,11 +594,52 @@
       noWorkers: false,
       scan: [],
       pick: null,
+      provision: { status: 'cloned-gh', path: '/home/dev/escacs/stack', message: 'cloned with gh to ~/escacs/stack' },
+      cli: { status: 'missing', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: null, onPath: true, message: '~/.local/bin/stack is not linked yet.' },
     }),
+    // First-run gate with no auth: get stack fails with the one actionable
+    // error and the gate stays.
+    'no-auth': () => {
+      const f = SCENARIOS['bad-stack']();
+      f.provision = { status: 'manual', path: null, message: 'could not fetch the stack: escacs/stack is private and no GitHub auth was found. run gh auth login, then retry.' };
+      return f;
+    },
+    // Valid stack, command not linked: boot shows the quiet [add stack
+    // command] line.
+    'no-cli': () => {
+      const f = SCENARIOS.populated();
+      f.cli = { status: 'missing', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: null, onPath: true, message: '~/.local/bin/stack is not linked yet.' };
+      return f;
+    },
+    // Valid stack, something else owns the name: the quiet line explains,
+    // with no offer (linking refuses to replace it).
+    'cli-foreign': () => {
+      const f = SCENARIOS.populated();
+      f.cli = { status: 'foreign-file', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: null, onPath: true, message: '~/.local/bin/stack exists and is not a symlink; leaving it alone.' };
+      return f;
+    },
+    // Valid stack, the link points at another stack's shim: the quiet
+    // line explains, with no offer (linking refuses to repoint it).
+    'cli-elsewhere': () => {
+      const f = SCENARIOS.populated();
+      f.cli = { status: 'points-elsewhere', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: '~/other-stack/bin/stack', onPath: true, message: '~/.local/bin/stack points at ~/other-stack/bin/stack, not at the stack shim; leaving it alone.' };
+      return f;
+    },
+    // Valid stack, linked, but the bin dir is off PATH: the quiet line
+    // carries the export hint, with no offer (nothing left to link).
+    'no-path': () => {
+      const f = SCENARIOS.populated();
+      f.cli = { status: 'bin-not-on-PATH', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: '~/escacs/stack/bin/stack', onPath: false, message: '~/.local/bin/stack is linked, but ~/.local/bin is not on PATH; add: export PATH="$HOME/.local/bin:$PATH", then open a new shell.' };
+      return f;
+    },
   };
 
   const fx = (SCENARIOS[scenario] ?? SCENARIOS.populated)();
   const presets = () => fx.presets ?? PRESETS;
+  // Provision + stack-command fixtures default to the settled state (a kept
+  // checkout, the command linked); scenarios above override what they need.
+  fx.provision ??= { status: 'kept', path: '/home/dev/escacs/stack', message: 'already at ~/escacs/stack' };
+  fx.cli ??= { status: 'linked-ok', link: '~/.local/bin/stack', expected: '~/escacs/stack/bin/stack', actual: '~/escacs/stack/bin/stack', onPath: true, message: 'the stack command is linked.' };
   const okOut = (stdout) => ({ stdout, stderr: '', code: 0, truncated: false });
   const errOut = (stderr, code = 1) => ({ stdout: '', stderr, code, truncated: false });
   const jsonOut = (v) => okOut(JSON.stringify(v, null, 2));
@@ -1015,6 +1058,36 @@
       ? { path: fx.stack.path, source: fx.stack.source }
       : { path: null, source: 'missing' },
     validate_stack: async () => structuredClone(fx.stack),
+    // A successful provision pins the path and validates from then on (the
+    // no-node scenario keeps its node error: provisioning never fixes node).
+    provision_stack: async () => {
+      const r = structuredClone(fx.provision);
+      if (r.status !== 'manual' && r.path) {
+        fx.config.stackPath = r.path;
+        fx.stack = fx.node.ok
+          ? { ...structuredClone(okStack), path: r.path, source: 'settings' }
+          : { ...structuredClone(fx.stack), path: r.path, source: 'settings' };
+      }
+      return r;
+    },
+    stack_cli_status: async () => structuredClone(fx.cli),
+    // Linking flips a missing link to linked (or bin-not-on-PATH when the
+    // bin dir is off PATH); anything else is reported unchanged, like Rust.
+    link_stack_cli: async () => {
+      if (fx.cli.status === 'missing') {
+        fx.cli = {
+          status: fx.cli.onPath ? 'linked-ok' : 'bin-not-on-PATH',
+          link: fx.cli.link,
+          expected: fx.cli.expected,
+          actual: fx.cli.expected,
+          onPath: fx.cli.onPath,
+          message: fx.cli.onPath
+            ? `linked ${fx.cli.link} -> ${fx.cli.expected}.`
+            : `linked ${fx.cli.link} -> ${fx.cli.expected}; but ~/.local/bin is not on PATH — add: export PATH="$HOME/.local/bin:$PATH", then open a new shell.`,
+        };
+      }
+      return structuredClone(fx.cli);
+    },
   };
 
   // Deterministic reloads per scenario.

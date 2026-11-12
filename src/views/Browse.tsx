@@ -25,6 +25,7 @@ import { errText, stackRun, type AppConfig } from '../bridge';
 import { href } from '../router';
 import { fmtBytes, kindOf, pluralOf } from '../parse';
 import { moveSel } from '../onboard';
+import { scrollByPage, scrollRowIntoView, scrollToTop } from '../smooth';
 import {
   defaultImportDest,
   describeImport,
@@ -396,7 +397,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       }
       if (ev.key === ' ' && !q()) {
         ev.preventDefault();
-        window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+        scrollByPage(window.innerHeight * 0.8);
         return;
       }
       if (ev.key.length === 1 && t !== inputEl) inputEl?.focus();
@@ -422,7 +423,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         setQi(null);
         setQiAsk(null);
         qiGen++;
-        window.scrollTo({ top: 0, behavior: 'instant' });
+        scrollToTop();
       },
       { defer: true },
     ),
@@ -449,7 +450,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     on(
       sel,
       (i) => {
-        if (i >= 0) document.querySelector(`[data-row="${i}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        if (i >= 0) {
+          const row = document.querySelector(`[data-row="${i}"]`);
+          if (row) scrollRowIntoView(row);
+        }
       },
       { defer: true },
     ),

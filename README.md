@@ -77,8 +77,9 @@ Shell-out wins because:
    Shell-out reuses the user's node, which the stack already requires
    (`engines: node >= 22`).
 3. The CLI already owns git and the import record (`stack.toml`). The app
-   itself never runs git, never commits/pushes, and never executes project
-   code.
+   runs git only for first-run provisioning (fixed `gh`/`git` clone
+   commands, fixed repo and destination — see `provision_stack` below),
+   never commits/pushes, and never executes project code.
 
 Cost: node must be on PATH at runtime. Mitigated by the `node_status` probe
 (called at startup; the setup screen shows its error, which names the fix) —
@@ -109,6 +110,9 @@ verbatim, they are written for users. The typed wrappers live in
 | `stack_location` | `{ stackDir? }` | `StackLocation` (wrapper exists; no current view calls it) |
 | `validate_stack` | `{ stackDir? }` | `StackReport` |
 | `stack_run` | `{ subcommand, args, projectDir, stackDir? }` | `{ stdout, stderr, code, truncated }` |
+| `provision_stack` | — | `ProvisionReport` (never throws; failure is status `manual`) |
+| `stack_cli_status` | `{ stackDir? }` | `CliStatus` (read-only) |
+| `link_stack_cli` | `{ stackDir? }` | `CliStatus` (links, or reports why not) |
 
 ```ts
 type AppConfig = {
@@ -127,7 +131,21 @@ type ScanOut = { root: string; roots: string[]; repos: ScanRepo[]; capped: boole
 type ScanRoots = { roots: string[]; stackPath: string | null };
 type StackLocation = { path: string | null; source: 'settings' | 'env' | 'auto' | 'missing' };
 type StackReport = { path: string; valid: boolean; source: string; git: boolean; cli: boolean; node: NodeStatus; error: string | null };
+type ProvisionReport = { status: 'kept' | 'cloned-gh' | 'cloned-ssh' | 'manual'; path: string | null; message: string };
+type CliStatus = { status: 'linked-ok' | 'missing' | 'points-elsewhere' | 'foreign-file' | 'bin-not-on-PATH'; link: string; expected: string; actual: string | null; onPath: boolean; message: string };
 ```
+
+`provision_stack` mirrors `scripts/provision-stack.sh` (same order, same
+paths): keep an existing usable checkout (settings, `$ESCACS_STACK`,
+`~/escacs/stack`), else `gh repo clone escacs/stack ~/escacs/stack` when
+`gh` is authenticated, else batch-mode ssh `git clone` (never prompts),
+then pin `stackPath`. Never overwrites an existing directory.
+`link_stack_cli` links `~/.local/bin/stack` at `<stack>/bin/stack` with the
+installer's rules: never replaces a non-symlink or a link to something else
+(reports instead), warns when `~/.local/bin` is not on `PATH`. The setup
+screen's get stack button calls the former, then auto-links; the folder
+picker auto-links too; boot checks the latter and shows one quiet
+dismissible line (with `[add stack command]` when the link is missing).
 
 `stack_run` allowlist (enforced in Rust before any subprocess starts):
 
@@ -153,6 +171,7 @@ type StackReport = { path: string; valid: boolean; source: string; git: boolean;
 
 Startup sequence (`boot()` in `src/store.ts`): `node_status` → app version →
 `get_config` → `validate_stack` → `validate_project` (if `config.project`) →
+`stack_cli_status` (quiet line when the `stack` command is not linked) →
 `stack_run list worker` → `stack_run status` (if a project is set and node is
 ok). An unusable stack blocks the views until it is fixed (setup screen).
 
@@ -211,7 +230,8 @@ python3 -I -m http.server 8137 --bind 127.0.0.1 --directory "$out"
 Open `http://127.0.0.1:8137/#<scenario>,/<route>`, for example
 `#conflicts,/project`. `dev/mock-app-bridge.js` reads the scenario from the
 hash: `populated` (default), `empty`, `noworker`, `noproject`, `scan`,
-`conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`. A
+`conflicts`, `missing`, `lookalike`, `fresh`, `bad-stack`, `no-node`,
+`no-auth`, `no-cli`, `cli-foreign`, `no-path`. A
 `+update-available` or `+update-error` suffix on any scenario drives the
 footer updater fixture (invented 0.1.9, emulated startup event and
 download progress). Reload the page to switch scenario; a hash-only change
@@ -231,7 +251,7 @@ package.json vite.config.ts tsconfig.json index.html
 web-vendor/style.css            # snapshot of the stack website's stylesheet
 dev/mock-bridge.js dev/mock-app-bridge.js
 src/                             # SolidJS renderer
-  index.tsx App.tsx app.css ui.tsx site.tsx glide.ts
+  index.tsx App.tsx app.css ui.tsx site.tsx smooth.ts
   bridge.ts store.ts updater.ts router.ts onboard.ts
   browseData.ts stackArgs.ts json.ts parse.ts
   views/

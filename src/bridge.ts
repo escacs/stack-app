@@ -54,6 +54,23 @@ export type StackReport = {
   error: string | null;
 };
 
+/** Outcome of in-app provisioning: kept / cloned-gh / cloned-ssh, or manual with the one actionable error. */
+export type ProvisionReport = {
+  status: 'kept' | 'cloned-gh' | 'cloned-ssh' | 'manual';
+  path: string | null;
+  message: string;
+};
+
+/** State of the ~/.local/bin/stack link. bin-not-on-PATH means linked but off PATH. */
+export type CliStatus = {
+  status: 'linked-ok' | 'missing' | 'points-elsewhere' | 'foreign-file' | 'bin-not-on-PATH';
+  link: string;
+  expected: string;
+  actual: string | null;
+  onPath: boolean;
+  message: string;
+};
+
 export const pickFolder = (): Promise<string | null> => invoke('pick_folder');
 
 export const getConfig = (): Promise<AppConfig> => invoke('get_config');
@@ -121,6 +138,26 @@ export function stackLocation(stackDir?: string | null): Promise<StackLocation> 
  */
 export function validateStack(stackDir?: string | null): Promise<StackReport> {
   return invoke('validate_stack', { ...(stackDir ? { stackDir } : {}) });
+}
+
+/**
+ * Provision the stack checkout from the app (same steps as
+ * scripts/provision-stack.sh): keep an existing checkout, else gh clone,
+ * else batch-mode ssh clone. Never throws: failure is status manual.
+ */
+export const provisionStack = (): Promise<ProvisionReport> => invoke('provision_stack');
+
+/** Where the stack command link stands (never changes anything). */
+export function stackCliStatus(stackDir?: string | null): Promise<CliStatus> {
+  return invoke('stack_cli_status', { ...(stackDir ? { stackDir } : {}) });
+}
+
+/**
+ * Link ~/.local/bin/stack at the checkout's bin/stack. Never replaces a
+ * non-symlink or a link to something else (reports instead).
+ */
+export function linkStackCli(stackDir?: string | null): Promise<CliStatus> {
+  return invoke('link_stack_cli', { ...(stackDir ? { stackDir } : {}) });
 }
 
 // Bridge errors arrive as rejected strings (real shell) or nulls (mock

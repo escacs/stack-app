@@ -8,15 +8,19 @@ import {
   addRecentProject,
   errText,
   getConfig,
+  linkStackCli,
   nodeStatus,
   pickFolder,
+  provisionStack,
   saveConfig,
+  stackCliStatus,
   stackRun,
   validateProject,
   validateStack,
   type AppConfig,
   type NodeStatus,
   type ProjectReport,
+  type ProvisionReport,
   type StackReport,
 } from './bridge';
 import {
@@ -63,6 +67,36 @@ export const [projectDone, setProjectDone] = createSignal(false);
 // Last failed user action (a save, a bad project path, a stack re-check).
 // Rendered once by App as a conflict line; cleared by the next action.
 export const [actionError, setActionError] = createSignal<string | null>(null);
+// One quiet dismissible line about the `stack` terminal command: set after
+// provisioning/picking (what the auto-link did) and at boot when a valid
+// stack's command is not linked. offerLink adds the [add stack command]
+// button; conflicts and plain reports dismiss with [x] only.
+export type CliNote = { text: string; offerLink: boolean };
+export const [cliNote, setCliNote] = createSignal<CliNote | null>(null);
+
+export function dismissCliNote(): void {
+  setCliNote(null);
+}
+
+let linkingCli = false;
+
+/** Link the stack command from the quiet line's [add stack command] button. */
+export async function addStackCommand(): Promise<void> {
+  // Double-click guard: the first call owns the link (the shell also maps
+  // a lost link race to a fresh status re-read, never a raw error).
+  if (linkingCli) return;
+  const c = config();
+  if (!c) return;
+  linkingCli = true;
+  try {
+    const l = await guard('stack command', () => linkStackCli(c.stackPath));
+    setCliNote(l.status === 'linked-ok' ? null : { text: l.message, offerLink: false });
+  } catch (err) {
+    setCliNote({ text: errText(err), offerLink: false });
+  } finally {
+    linkingCli = false;
+  }
+}
 
 export const project = createMemo(() => config()?.project ?? null);
 export const workerName = createMemo(() => config()?.worker ?? null);
@@ -150,6 +184,17 @@ export async function boot(): Promise<void> {
     if (c.project) setReport(await checkProject(c.project));
     setConfig(c);
     if (!s.valid) return;
+    // A valid stack whose `stack` command is not linked gets one quiet line
+    // offering to add it. Advisory only: never blocks boot.
+    try {
+      const cli = await stackCliStatus(c.stackPath);
+      if (cli.status !== 'linked-ok') {
+        // Only a missing link is fixable in-app; conflicts just explain.
+        setCliNote({ text: cli.message, offerLink: cli.status === 'missing' });
+      }
+    } catch {
+      // No cli state (older shell, odd checkout): stay quiet.
+    }
     await refreshWorkers();
     if (c.project && n.ok) await refreshLock();
   } catch (err) {
@@ -272,7 +317,58 @@ export async function chooseStackPath(): Promise<string | null> {
     return errText(err);
   }
   if (!dir) return null;
-  return setStackOverride({ ...c, stackPath: dir });
+  const err = await setStackOverride({ ...c, stackPath: dir });
+  if (err) return err;
+  await autoLinkCli(dir, null);
+  return null;
+}
+
+/**
+ * Link the `stack` command after provisioning or picking a folder. Quiet
+ * when already linked; otherwise one dismissible line says what happened
+ * (linked, left alone, or off PATH). Never throws.
+ */
+async function autoLinkCli(stackDir: string | null, prefix: string | null): Promise<void> {
+  try {
+    const l = await guard('stack command', () => linkStackCli(stackDir));
+    if (l.status === 'linked-ok') {
+      // A fresh link gets its one quiet line; an already-correct link
+      // stays silent (a provision prefix still shows on its own).
+      const linked = l.message.startsWith('linked ') ? `stack command linked → ${l.link}` : null;
+      const text = prefix && linked ? `${prefix}; ${linked}` : (prefix ?? linked);
+      if (text) setCliNote({ text, offerLink: false });
+      return;
+    }
+    setCliNote({ text: prefix ? `${prefix}; ${l.message}` : l.message, offerLink: false });
+  } catch (err) {
+    const text = prefix ? `${prefix}; ${errText(err)}` : errText(err);
+    setCliNote({ text, offerLink: false });
+  }
+}
+
+/**
+ * Fetch the stack checkout from the setup screen (get stack). Returns the
+ * error text for the caller's notice on failure, null on success (the
+ * provision + link report lands on the quiet cli line instead, since the
+ * setup screen unmounts).
+ */
+export async function provisionCheckout(): Promise<string | null> {
+  const c = config();
+  if (!c) return null;
+  let r: ProvisionReport;
+  try {
+    r = await guard('get stack', () => provisionStack());
+  } catch (err) {
+    return errText(err);
+  }
+  if (!r || typeof r.status !== 'string') return errText(r);
+  if (r.status === 'manual' || !r.path) return r.message;
+  // Rust already pinned the path in the settings; mirror it locally so the
+  // revalidation below (and the session) uses this checkout.
+  setConfig({ ...c, stackPath: r.path });
+  await revalidateStack();
+  await autoLinkCli(r.path, r.message);
+  return null;
 }
 
 /** Clear the override (back to automatic lookup) and revalidate. */

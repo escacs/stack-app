@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createSignal, onCleanup, onMount } from 'solid-js';
-import { actionError, appVersion, boot, bootError, config, configNotice, lock, projectDone, stack, whoDone, workerSkipped } from './store';
+import { actionError, addStackCommand, appVersion, boot, bootError, cliNote, config, configNotice, dismissCliNote, lock, projectDone, stack, whoDone, workerSkipped } from './store';
 import { countUpdates } from './parse';
 import { href, parseHash, resolveView } from './router';
 import TitleBar from './views/TitleBar';
@@ -54,6 +54,17 @@ export default function App() {
         </Show>
         <Show when={configNotice()}>
           <p class="empty">{configNotice()}</p>
+        </Show>
+        <Show when={cliNote()}>
+          {(n) => (
+            <p class="empty">
+              {n().text}{' '}
+              <Show when={n().offerLink}>
+                <button class="linklike" onClick={() => void addStackCommand()}>[add stack command]</button>{' '}
+              </Show>
+              <button class="linklike" onClick={dismissCliNote}>[x]</button>
+            </p>
+          )}
         </Show>
         <Show when={!config() && !bootError()}>
           <p class="empty">(._.) starting…</p>
