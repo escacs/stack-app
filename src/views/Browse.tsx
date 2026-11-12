@@ -3,8 +3,9 @@
 // and rendered docs. Data comes through stack_run as --json; file bodies
 // and images arrive via `show --file` (the web fetches them as URLs).
 // Desktop additions, kept visually quiet: the import section, git-state
-// markers on rows, the /all route (the site links * all at #/search/), and
-// click-only meta/preview links (the keyboard walks the tree files).
+// markers on rows, inline row imports ([import] on hover/selection, `i`),
+// the /all route (the site links * all at #/search/), and click-only
+// meta/preview links (the keyboard walks the tree files).
 // Pure logic (routes, crumbs, catalog index, fetch cache) is in ../browseData.
 import type { JSX } from 'solid-js';
 import {
@@ -25,14 +26,20 @@ import { href } from '../router';
 import { fmtBytes, kindOf, pluralOf } from '../parse';
 import { moveSel } from '../onboard';
 import {
+  defaultImportDest,
   describeImport,
   entryMarkers,
   fromStackOut,
   importArgs,
+  importDestHint,
+  needsImportDest,
+  quickImportError,
+  quickImportLine,
   refusalFiles,
   showFileArgs,
   toShowDoc,
   toShowFile,
+  type ImportJson,
   type JsonEntry,
   type ListJson,
   type OpSection,
@@ -79,6 +86,19 @@ type Agg = ReturnType<typeof kindAgg>;
 type Doc = ReturnType<typeof toShowDoc>;
 type FileBody = ReturnType<typeof toShowFile>;
 
+/**
+ * One inline row import at a time, keyed by entry id. `done` keeps the full
+ * sections for the click-to-expand log (no → project link: that stays on the
+ * entry page); `error` keeps the stderr plus its look-alike list, if any.
+ */
+type QiState =
+  | { id: string; phase: 'working' }
+  | { id: string; phase: 'done'; line: string; sections: OpSection[]; expanded: boolean }
+  | { id: string; phase: 'error'; line: string; err: string; lookalikes: string[]; expanded: boolean };
+
+const qiDone = (s: QiState | null) => (s?.phase === 'done' ? s : null);
+const qiError = (s: QiState | null) => (s?.phase === 'error' ? s : null);
+
 export default function Browse(props: { scenario: string; segs: string[] }) {
   const [entries, setEntries] = createSignal<JsonEntry[]>([]);
   const [uncommitted, setUncommitted] = createSignal<Set<string>>(new Set());
@@ -87,8 +107,18 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   const [q, setQ] = createSignal('');
   const [sel, setSel] = createSignal(-1);
   const [entryFiles, setEntryFiles] = createSignal<ShowFile[]>([]);
+  const [qi, setQi] = createSignal<QiState | null>(null);
+  const [qiAsk, setQiAsk] = createSignal<{ id: string; value: string } | null>(null);
   let inputEl: HTMLInputElement | undefined;
   let listGen = 0;
+  let qiTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearQiTimer = (): void => {
+    if (qiTimer !== undefined) {
+      clearTimeout(qiTimer);
+      qiTimer = undefined;
+    }
+  };
+  onCleanup(clearQiTimer);
 
   // Changes only when the project or stack checkout does, never on config edits.
   const source = createMemo(() => sourceKey(config()));
@@ -160,6 +190,95 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   const crumbs = createMemo(() =>
     crumbParts(route(), searching()).map((p) => ({ label: p.label, href: targetHref(p.target) })),
   );
+
+  const importedIds = createMemo(() => new Set(lock().rows.map((r) => r.id)));
+
+  /** The entry under the keyboard cursor, when the cursor is on an entry row. */
+  const selEntry = (): JsonEntry | null => {
+    const i = sel();
+    if (i < 0) return null;
+    if (searching()) return found()[i] ?? null;
+    const r = route();
+    if (r.kind === 'all') return allSorted()[i] ?? null;
+    if (r.kind === 'kind') {
+      const g = grouped();
+      const ordered = g ? [...g.groups.flatMap((x) => x.members), ...g.ungrouped] : kindList();
+      return ordered[i] ?? null;
+    }
+    return null;
+  };
+
+  /** A result line clears itself after a few seconds, unless expanded. */
+  const armQiTimer = (ms: number): void => {
+    clearQiTimer();
+    qiTimer = setTimeout(() => {
+      const s = qi();
+      if (s && s.phase !== 'working' && !s.expanded) setQi(null);
+    }, ms);
+  };
+
+  const toggleQiFull = (): void => {
+    const s = qi();
+    if (!s || s.phase === 'working') return;
+    clearQiTimer();
+    setQi({ ...s, expanded: !s.expanded });
+    if (s.expanded) armQiTimer(8000);
+  };
+
+  /**
+   * Import straight from a row: one click with the default destination, no
+   * navigation. Entries needing a destination open the inline `to` field
+   * instead; `dest` set means that field was confirmed. Like the entry
+   * page, a success refreshes the lock, the report and the catalog.
+   */
+  async function quickImport(e: JsonEntry, dest?: string): Promise<void> {
+    if (qi()?.phase === 'working') return;
+    const c = config();
+    if (!c?.project) return;
+    if (importedIds().has(e.id) || !e.committed) return;
+    if (dest === undefined && needsImportDest(e)) {
+      if (qiAsk()?.id !== e.id) {
+        clearQiTimer();
+        setQi(null);
+        setQiAsk({ id: e.id, value: importDestHint(e) ?? '' });
+      }
+      return;
+    }
+    clearQiTimer();
+    setQiAsk(null);
+    setQi({ id: e.id, phase: 'working' });
+    try {
+      const out = await stackRun('import', importArgs(e.id, dest ?? ''), c.project, c.stackPath);
+      const r = fromStackOut<ImportJson>(out);
+      setQi({ id: e.id, phase: 'done', line: quickImportLine(r, e.id), sections: describeImport(r), expanded: false });
+      await refreshLock();
+      // Import creates stack.toml implicitly: the project page's set-up slot
+      // must re-check on the next visit.
+      await refreshReport();
+      void load();
+      armQiTimer(8000);
+    } catch (err) {
+      const text = errText(err);
+      setQi({
+        id: e.id,
+        phase: 'error',
+        line: quickImportError(text),
+        err: text,
+        lookalikes: refusalFiles(text),
+        expanded: false,
+      });
+      armQiTimer(15000);
+    }
+  }
+
+  const confirmQiAsk = (): void => {
+    const a = qiAsk();
+    if (!a) return;
+    const dest = a.value.trim();
+    if (!dest) return;
+    const e = index().byId.get(a.id);
+    if (e) void quickImport(e, dest);
+  };
 
   const up = (): void => {
     const r = route();
@@ -250,6 +369,17 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           else up();
           return;
       }
+      // `i` imports the cursor row in place. Text fields keep it (the
+      // early return above, plus the search box here); with no cursor row it
+      // falls through and lands in the search like any other letter.
+      if (ev.key === 'i' && t !== inputEl) {
+        const e = selEntry();
+        if (e) {
+          ev.preventDefault();
+          void quickImport(e);
+          return;
+        }
+      }
       if (ev.key === ' ' && !q()) {
         ev.preventDefault();
         window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
@@ -267,13 +397,16 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     untrack(() => void load());
   });
 
-  // A new route clears the prompt and the cursor, like the web hashchange.
+  // A new route clears the prompt, the cursor and any inline import, like the web hashchange.
   createEffect(
     on(
       () => props.segs.join('/'),
       () => {
         untrack(clearQuery);
         setSel(-1);
+        clearQiTimer();
+        setQi(null);
+        setQiAsk(null);
         window.scrollTo({ top: 0, behavior: 'instant' });
       },
       { defer: true },
@@ -340,6 +473,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
               uncommitted={uncommitted()}
               sel={sel()}
               entryHref={entryHref}
+              qi={qi()}
+              ask={qiAsk()}
+              importedIds={importedIds()}
+              onImport={(e) => void quickImport(e)}
+              onAskInput={(value) => setQiAsk((a) => (a ? { ...a, value } : a))}
+              onAskConfirm={confirmQiAsk}
+              onAskClose={() => setQiAsk(null)}
+              onToggleFull={toggleQiFull}
             />
           </Match>
           <Match when={route().kind === 'home' && !searching()}>
@@ -353,6 +494,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
                 uncommitted={uncommitted()}
                 sel={sel()}
                 entryHref={entryHref}
+                qi={qi()}
+                ask={qiAsk()}
+                importedIds={importedIds()}
+                onImport={(e) => void quickImport(e)}
+                onAskInput={(value) => setQiAsk((a) => (a ? { ...a, value } : a))}
+                onAskConfirm={confirmQiAsk}
+                onAskClose={() => setQiAsk(null)}
+                onToggleFull={toggleQiFull}
               />
             )}
           </Match>
@@ -396,15 +545,29 @@ function Krow(props: { index: number; sel: number; href: string; zero: boolean; 
   );
 }
 
-/** One catalog row: sprite, name, dotted leader, preview, face, size. */
-function EntryRow(props: {
-  e: JsonEntry;
-  byId: boolean;
-  uncommitted: Set<string>;
-  index: number;
-  sel: number;
-  entryHref: (id: string) => string;
-}) {
+/** Inline-import plumbing threaded from Browse into every entry row. */
+type QiProps = {
+  qi: QiState | null;
+  ask: { id: string; value: string } | null;
+  importedIds: Set<string>;
+  onImport: (e: JsonEntry) => void;
+  onAskInput: (value: string) => void;
+  onAskConfirm: () => void;
+  onAskClose: () => void;
+  onToggleFull: () => void;
+};
+
+/** One catalog row: sprite, name, dotted leader, preview, face, size, import slot. */
+function EntryRow(
+  props: {
+    e: JsonEntry;
+    byId: boolean;
+    uncommitted: Set<string>;
+    index: number;
+    sel: number;
+    entryHref: (id: string) => string;
+  } & QiProps,
+) {
   let rowEl: HTMLAnchorElement | undefined;
   const selected = createMemo(() => props.sel === props.index);
   const markers = () => entryMarkers(props.e, props.uncommitted);
@@ -437,23 +600,105 @@ function EntryRow(props: {
     });
   });
 
+  const active = (): QiState | null => {
+    const s = props.qi;
+    return s?.id === props.e.id ? s : null;
+  };
+  const asking = (): boolean => props.ask?.id === props.e.id;
+  const imported = (): boolean => props.importedIds.has(props.e.id);
+  const opBusy = (): boolean => props.qi?.phase === 'working' && props.qi.id !== props.e.id;
+  const importTitle = (): string =>
+    needsImportDest(props.e)
+      ? 'import to a folder you choose'
+      : `import to ${defaultImportDest(props.e)}`;
+
   return (
-    <a
-      ref={rowEl}
-      class="row"
-      href={props.entryHref(props.e.id)}
-      data-row={props.index}
-      data-nav=""
-      data-sel={selected() ? '' : undefined}
-    >
-      <Sprite kind={props.e.kind} origin={props.e.origin} />
-      <span class="nm">{props.byId ? props.e.id : (props.e.name ?? props.e.id)}</span>
-      <Markers notCommitted={markers().notCommitted} uncommittedInStack={markers().uncommittedInStack} />
-      <span class="lead" aria-hidden="true" />
-      <Show when={thumb()}>{(src) => <img class="rthumb" src={src()} alt="" />}</Show>
-      <Face status={props.e.status} />
-      <span class="num">{`${props.e.files}f ${fmtBytes(props.e.bytes)}`}</span>
-    </a>
+    <div class="qi">
+      <div class="qirow">
+        <a
+          ref={rowEl}
+          class="row"
+          href={props.entryHref(props.e.id)}
+          data-row={props.index}
+          data-nav=""
+          data-sel={selected() ? '' : undefined}
+        >
+          <Sprite kind={props.e.kind} origin={props.e.origin} />
+          <span class="nm">{props.byId ? props.e.id : (props.e.name ?? props.e.id)}</span>
+          <Markers notCommitted={markers().notCommitted} uncommittedInStack={markers().uncommittedInStack} />
+          <span class="lead" aria-hidden="true" />
+          <Show when={thumb()}>{(src) => <img class="rthumb" src={src()} alt="" />}</Show>
+          <Face status={props.e.status} />
+          <span class="num">{`${props.e.files}f ${fmtBytes(props.e.bytes)}`}</span>
+        </a>
+        <span class="qiact">
+          <Show
+            when={!imported() && props.e.committed}
+            fallback={
+              <Show when={imported()}>
+                <span class="marker" title="already imported in this project">
+                  imported
+                </span>
+              </Show>
+            }
+          >
+            <Show when={active()?.phase === 'working'} fallback={
+              <button
+                class="btn"
+                disabled={opBusy()}
+                title={importTitle()}
+                aria-label={`import ${props.e.id}`}
+                onClick={() => props.onImport(props.e)}
+              >
+                import
+              </button>
+            }>
+              <span class="dimtxt">working</span>
+            </Show>
+          </Show>
+        </span>
+      </div>
+      <Show when={asking()}>
+        <QiAsk
+          id={props.e.id}
+          value={props.ask?.value ?? ''}
+          opBusy={opBusy()}
+          onInput={props.onAskInput}
+          onConfirm={props.onAskConfirm}
+          onClose={props.onAskClose}
+        />
+      </Show>
+      <Show when={qiDone(active())}>
+        {(d) => (
+          <div class="qires">
+            <button class="qiline" title="show the full import log" onClick={() => props.onToggleFull()}>
+              {d().line}
+            </button>
+            <Show when={d().expanded}>
+              <OpResult sections={d().sections} />
+            </Show>
+          </div>
+        )}
+      </Show>
+      <Show when={qiError(active())}>
+        {(s) => (
+          <div class="qires">
+            <span class="conflict">{s().line}</span>
+            <button class="btn" title="show the full error" onClick={() => props.onToggleFull()}>
+              details
+            </button>
+            <Show when={s().expanded}>
+              <Show when={s().lookalikes.length} fallback={<CliErr text={s().err} />}>
+                <p class="conflict" role="alert">
+                  untracked look-alikes, nothing written:
+                </p>
+                <pre class="raw">{s().lookalikes.join('\n')}</pre>
+              </Show>
+            </Show>
+          </div>
+        )}
+      </Show>
+    </div>
   );
 }
 
@@ -490,14 +735,65 @@ function KindHome(props: {
   );
 }
 
-/** Flat entry list: the kind view, the `all` list and search results. */
-function EntryList(props: {
-  byId: boolean;
-  entries: JsonEntry[];
-  uncommitted: Set<string>;
-  sel: number;
-  entryHref: (id: string) => string;
+/**
+ * The inline destination field for entries that must not import blindly.
+ * Its own component so onMount (after insertion, unlike ref) can focus the
+ * field and select the prefill.
+ */
+function QiAsk(props: {
+  id: string;
+  value: string;
+  opBusy: boolean;
+  onInput: (value: string) => void;
+  onConfirm: () => void;
+  onClose: () => void;
 }) {
+  let inputEl: HTMLInputElement | undefined;
+  onMount(() => {
+    inputEl?.focus();
+    inputEl?.select();
+  });
+  return (
+    <div class="qiask">
+      <span class="dimtxt">to:</span>
+      <input
+        type="text"
+        value={props.value}
+        size={24}
+        aria-label={`import destination for ${props.id}`}
+        ref={inputEl}
+        onInput={(ev) => props.onInput(ev.currentTarget.value)}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            props.onConfirm();
+          } else if (ev.key === 'Escape') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            props.onClose();
+          }
+        }}
+      />
+      <button class="btn" disabled={!props.value.trim() || props.opBusy} onClick={() => props.onConfirm()}>
+        import
+      </button>
+      <button class="linklike" title="close without importing" onClick={() => props.onClose()}>
+        esc
+      </button>
+    </div>
+  );
+}
+
+/** Flat entry list: the kind view, the `all` list and search results. */
+function EntryList(
+  props: {
+    byId: boolean;
+    entries: JsonEntry[];
+    uncommitted: Set<string>;
+    sel: number;
+    entryHref: (id: string) => string;
+  } & QiProps,
+) {
   return (
     <Show when={props.entries.length} fallback={<Empty>(._.) none</Empty>}>
       <div class="rows">
@@ -510,6 +806,14 @@ function EntryList(props: {
               index={i()}
               sel={props.sel}
               entryHref={props.entryHref}
+              qi={props.qi}
+              ask={props.ask}
+              importedIds={props.importedIds}
+              onImport={props.onImport}
+              onAskInput={props.onAskInput}
+              onAskConfirm={props.onAskConfirm}
+              onAskClose={props.onAskClose}
+              onToggleFull={props.onToggleFull}
             />
           )}
         </For>
@@ -524,13 +828,15 @@ function EntryList(props: {
  * beneath. Headers carry no data-row, so the keyboard cursor skips them;
  * member indices continue the rows() order across groups (then ungrouped rows).
  */
-function ComponentKindView(props: {
-  groups: LibraryGroup[];
-  ungrouped: JsonEntry[];
-  uncommitted: Set<string>;
-  sel: number;
-  entryHref: (id: string) => string;
-}) {
+function ComponentKindView(
+  props: {
+    groups: LibraryGroup[];
+    ungrouped: JsonEntry[];
+    uncommitted: Set<string>;
+    sel: number;
+    entryHref: (id: string) => string;
+  } & QiProps,
+) {
   type Block =
     | { kind: 'lib'; lib: LibraryGroup['lib']; members: JsonEntry[]; start: number }
     | { kind: 'plain'; members: JsonEntry[]; start: number };
@@ -566,6 +872,14 @@ function ComponentKindView(props: {
                         index={b.start + i()}
                         sel={props.sel}
                         entryHref={props.entryHref}
+                        qi={props.qi}
+                        ask={props.ask}
+                        importedIds={props.importedIds}
+                        onImport={props.onImport}
+                        onAskInput={props.onAskInput}
+                        onAskConfirm={props.onAskConfirm}
+                        onAskClose={props.onAskClose}
+                        onToggleFull={props.onToggleFull}
                       />
                     )}
                   </For>
@@ -582,6 +896,14 @@ function ComponentKindView(props: {
                       index={b.start + i()}
                       sel={props.sel}
                       entryHref={props.entryHref}
+                      qi={props.qi}
+                      ask={props.ask}
+                      importedIds={props.importedIds}
+                      onImport={props.onImport}
+                      onAskInput={props.onAskInput}
+                      onAskConfirm={props.onAskConfirm}
+                      onAskClose={props.onAskClose}
+                      onToggleFull={props.onToggleFull}
                     />
                   )}
                 </For>

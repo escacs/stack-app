@@ -325,6 +325,40 @@ export function importArgs(id: string, to: string): string[] {
   return dest ? [id, '--to', dest, '--json'] : [id, '--json'];
 }
 
+/**
+ * Where `import <id>` lands without --to, mirroring imports.mjs: skills and
+ * styles go to .agents/skills/<name>, payload entries (templates) mirror at
+ * the project root, everything else under .stack/<id>. The row button shows
+ * this as its hover text; the CLI stays authoritative for the real path.
+ */
+export function defaultImportDest(e: Pick<JsonEntry, 'id' | 'kind' | 'name' | 'payload'>): string {
+  if (e.kind === 'skill' || e.kind === 'style') return `.agents/skills/${e.name}`;
+  if (e.payload) return '.';
+  return `.stack/${e.id}`;
+}
+
+/**
+ * Whether the row must ask for a destination instead of importing blindly.
+ * The CLI never *requires* --to (there is always a fallback), but its own
+ * usage text imports `copy` entries as `import <id> --to <dir>`: without a
+ * destination a component lands in .stack/, not in the source tree. Payload
+ * entries (templates) are the exception: their default mirrors the project
+ * root, which is the documented landing spot.
+ */
+export function needsImportDest(e: Pick<JsonEntry, 'usage' | 'payload'>): boolean {
+  return e.usage === 'copy' && !e.payload;
+}
+
+/**
+ * Prefill for the inline destination field: components follow the
+ * `src/components/<name>` convention (the CLI's own hint for member
+ * imports). Anything else needing a destination has no catalog convention,
+ * so the field opens empty.
+ */
+export function importDestHint(e: Pick<JsonEntry, 'kind' | 'name'>): string | null {
+  return e.kind === 'component' ? `src/components/${e.name}` : null;
+}
+
 /** Args for `preset list` / `preset show <name>` / `preset apply <name>`. */
 export function presetListArgs(): string[] {
   return ['list', '--json'];
@@ -456,6 +490,30 @@ export function describeImport(r: ImportJson): OpSection[] {
   }
   if (!secs.length) secs.push({ title: 'nothing to do', lines: [], tone: 'dim' });
   return secs;
+}
+
+/**
+ * The inline one-liner after a row import: `imported → <path>`, plus `+N
+ * dep` when the import pulled in entries required by others
+ * (ImportJson.requiredBy). A row that landed in `already` (imported
+ * elsewhere between the list and the click) reads `already here`.
+ */
+export function quickImportLine(r: ImportJson, id: string): string {
+  const main = r.imported.find((p) => p.id === id) ?? r.imported[0];
+  if (!main) return r.already.includes(id) ? 'already here' : 'imported';
+  const deps = r.imported.filter((p) => p.requiredBy).length;
+  const base = `imported → ${main.path}`;
+  return deps ? `${base} +${deps} dep` : base;
+}
+
+/** The inline one-liner for a failed row import: the first stderr line, capped. */
+export function quickImportError(stderrText: string): string {
+  const first = stderrText
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!first) return 'import failed';
+  return first.length > 100 ? `${first.slice(0, 99)}…` : first;
 }
 
 /** Render an update --json result as display sections. */

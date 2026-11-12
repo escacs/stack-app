@@ -12,10 +12,13 @@ import {
   describeSync,
   describeUpdate,
   docNameFor,
+  defaultImportDest,
   entryMarkers,
   fromStackOut,
   importArgs,
+  importDestHint,
   matchPresets,
+  needsImportDest,
   parseJsonOut,
   presetApplyArgs,
   presetCountText,
@@ -26,6 +29,8 @@ import {
   presetsStartOpen,
   presetShowArgs,
   previewFresh,
+  quickImportError,
+  quickImportLine,
   refusalFiles,
   searchArgs,
   showFileArgs,
@@ -236,6 +241,70 @@ describe('searchArgs / importArgs', () => {
   it('adds --to only when set', () => {
     expect(importArgs('skills/a', '')).toEqual(['skills/a', '--json']);
     expect(importArgs('skills/a', '  vendor ')).toEqual(['skills/a', '--to', 'vendor', '--json']);
+  });
+});
+
+describe('quick import destinations', () => {
+  it('mirrors the CLI fallback: skills, payloads, then .stack/', () => {
+    expect(defaultImportDest({ id: 'skills/file-pr', kind: 'skill', name: 'file-pr' })).toBe('.agents/skills/file-pr');
+    expect(defaultImportDest({ id: 'styles/x', kind: 'style', name: 'x' })).toBe('.agents/skills/x');
+    expect(defaultImportDest({ id: 'templates/agents-md', kind: 'template', name: 'agents-md', payload: 'files' })).toBe(
+      '.',
+    );
+    expect(defaultImportDest({ id: 'components/react/button', kind: 'component', name: 'button' })).toBe(
+      '.stack/components/react/button',
+    );
+    expect(defaultImportDest({ id: 'workers/mel', kind: 'worker', name: 'mel' })).toBe('.stack/workers/mel');
+  });
+
+  it('asks for a destination only for copy entries without a payload', () => {
+    expect(needsImportDest({ usage: 'copy' })).toBe(true);
+    expect(needsImportDest({ usage: 'link' })).toBe(false);
+    expect(needsImportDest({ usage: 'reference' })).toBe(false);
+    expect(needsImportDest({ usage: 'package' })).toBe(false);
+    expect(needsImportDest({ usage: 'copy', payload: 'files' })).toBe(false);
+  });
+
+  it('prefills components with src/components/<name>, nothing otherwise', () => {
+    expect(importDestHint({ kind: 'component', name: 'button' })).toBe('src/components/button');
+    expect(importDestHint({ kind: 'asset', name: 'escacs-mark' })).toBeNull();
+  });
+});
+
+describe('quickImportLine / quickImportError', () => {
+  const res = (imported: ImportJson['imported'], already: string[] = []): ImportJson => ({
+    command: 'import',
+    commit: 'c',
+    imported,
+    already,
+    gitignore: 'unchanged',
+  });
+
+  it('reads imported → path, with +N dep for required entries', () => {
+    expect(quickImportLine(res([{ id: 'skills/a', path: '.agents/skills/a' }]), 'skills/a')).toBe(
+      'imported → .agents/skills/a',
+    );
+    expect(
+      quickImportLine(
+        res([
+          { id: 'components/react/button', path: 'src/components/ui' },
+          { id: 'components/react/icon-button', path: '.stack/components/react/icon-button', requiredBy: 'components/react/button' },
+        ]),
+        'components/react/button',
+      ),
+    ).toBe('imported → src/components/ui +1 dep');
+  });
+
+  it('names already-here rows instead of a path', () => {
+    expect(quickImportLine(res([], ['skills/a']), 'skills/a')).toBe('already here');
+  });
+
+  it('keeps the first stderr line, capped, for failures', () => {
+    expect(quickImportError('these files already exist with other content; move them or choose --to:\n  a\n  b')).toBe(
+      'these files already exist with other content; move them or choose --to:',
+    );
+    expect(quickImportError('')).toBe('import failed');
+    expect(quickImportError(`${'x'.repeat(200)}\nsecond`)).toBe(`${'x'.repeat(99)}…`);
   });
 });
 

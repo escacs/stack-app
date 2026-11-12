@@ -219,6 +219,13 @@ Each row shows the name, the status face, and the file count and size. A
 `components/react`, with a member count and `default` if it is the default
 library.
 
+Every entry row carries a quiet `[import]` button at its right end. It
+shows while the row is hovered, focused or under the cursor, and stays
+visible on touch screens. One click imports with the default destination,
+without leaving the list. Rows this project already imported show
+`(imported)` instead; rows that cannot be imported (`not-committed`) show
+nothing.
+
 ### all
 
 Every entry, in kind order. Rows show full ids (`skills/file-pr`).
@@ -324,12 +331,42 @@ import
   here show under `already here`. A `.gitignore` line shows when the managed
   block changed.
 
+The same import runs straight from any entry row in a list: kind views,
+search results, `all`, and component library groups. While it runs the
+row reads `working`; on success the row flips to `(imported)` and a
+one-line result appears under it for a few seconds:
+
+```
+★ ponytail     (o_O)  2f 219b                   (imported)
+   imported → .agents/skills/ponytail
+```
+
+A click on that line expands the full import log. Pulled-in dependencies
+are mentioned briefly (`+1 dep`). On failure the short error shows
+instead, with a `[details]` button for the full error or the look-alike
+list. Only one import runs at a time.
+
+Entries that belong in the source tree — components and other `copy`
+entries — are never imported blindly: their row button opens a small
+inline field on the row itself, prefilled with the convention
+(`src/components/button` for components) when there is one:
+
+```
+◆ button       (o_O)  2f 219b                     [import]
+   to: [src/components/ui  ]  [import]  esc
+```
+
+`Enter` imports there, `Escape` (or `esc`) closes the field. The entry
+page's import section keeps working as before, including an empty `--to`
+for the CLI default.
+
 ### Keys in Browse
 
 | key | does |
 |---|---|
 | `↑` `↓` | move the cursor over rows: home rows, list rows, file tree |
 | `Enter` | open the cursor row. With a search and no cursor, open the first result |
+| `i` | import the cursor row in place (lists only; never inside a text field) |
 | `Escape` | clear the search. Otherwise go up one level: file → entry → kind → home |
 | `Space` | scroll down about 80% of a page, when the search box is empty |
 | letter or digit | focus the search box and type into it |

@@ -101,6 +101,32 @@ input[type="text"]::placeholder { color: var(--ghost); }
 .libhead .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .libgroup .rows { padding-left: 2ch; }
 
+/* quick import on browse rows ----------------------------------------- */
+.qirow { display: flex; align-items: baseline; }
+.qirow > a.row { flex: 1 1 auto; min-width: 0; }
+/* the cursor follows the whole row, including the action slot */
+.qi:hover .row::before { content: ">"; color: var(--dim); }
+.qiact { flex: none; min-width: 10ch; text-align: right; margin-left: 1ch; }
+/* the button stays out of sight (and out of the tab order) until the row
+   is hovered, focused or under the keyboard cursor */
+.qiact .btn { visibility: hidden; }
+.qi:hover .qiact .btn,
+.qi:focus-within .qiact .btn,
+.qirow > a.row[data-sel] + .qiact .btn { visibility: visible; }
+@media (hover: none) { .qiact .btn { visibility: visible; } }
+.qires, .qiask {
+  display: flex; flex-wrap: wrap; gap: 0 1ch; align-items: baseline;
+  padding-left: 3.5ch;
+}
+.qires > .oplog, .qires > .raw, .qires > p { flex: 1 1 100%; }
+.qires > .oplog { margin: 4px 0 8px; }
+.qires .qiline {
+  font: inherit; background: none; border: 0; padding: 0;
+  color: var(--dim); cursor: pointer; text-align: left;
+}
+.qires .qiline:hover { text-decoration: underline; text-underline-offset: 4px; }
+.qires .qiline:focus-visible { outline: 1px dotted var(--accent); outline-offset: 2px; }
+
 /* first-run onboarding: one question per screen ------------------------ */
 .onboard { max-width: 64ch; margin: 6vh auto 0; }
 .onboard .prompt { font-size: 20px; margin: 28px 0 20px; }
