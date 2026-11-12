@@ -785,17 +785,27 @@
             if (!e || e.committed === false) {
               return errOut(`${id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
             }
-            if (fx.lock.some((r) => r.id === id)) {
+            // An id the plan already pulled in as a dep counts as already
+            // here, like the real import (which sees it in the lock by then).
+            if (fx.lock.some((r) => r.id === id) || imported.some((p) => p.id === id)) {
               already.push(id);
               continue;
             }
             const clash = clashUnder(id, to || destFor(id));
             if (clash.length) conflicts.push(...clash);
             imported.push({ id, path: to || destFor(id) });
+            // Same auto-import of requires as the real import below. A dry
+            // run writes nothing, so dedupe against the plan as well as the
+            // lock (the real path dedupes through the lock it updates).
+            for (const req of e.requires ?? []) {
+              if (!fx.lock.some((r) => r.id === req) && !imported.some((p) => p.id === req)) {
+                imported.push({ id: req, path: destFor(req), requiredBy: id });
+              }
+            }
           }
           if (!json) {
             return okOut([
-              ...imported.map((p) => `import  ${p.id} -> ${p.path}`),
+              ...imported.map((p) => `import  ${p.id} -> ${p.path}${p.requiredBy ? ` (required by ${p.requiredBy})` : ''}`),
               ...conflicts.map((c) => `CONFLICT ${c} (exists with other content; a real import would abort)`),
               'dry run: nothing written',
             ].join('\n'));
