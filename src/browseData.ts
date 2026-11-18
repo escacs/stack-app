@@ -224,3 +224,93 @@ export function whenVisible(el: Element, cb: () => void): () => void {
 
 /** Module-wide preview cache: data URLs (or null when the file has no image bytes). */
 export const previewCache = createFetchCache<string | null>(3);
+
+// ------------------------------------------------------------------ selection
+
+/**
+ * Toggle one id in a selection. Returns a new set; the input is untouched,
+ * so a Solid signal holding it sees a changed reference.
+ */
+export function toggleSelected(prev: Set<string>, id: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/**
+ * Inclusive id range between anchor and focus in list order, either
+ * direction. A missing anchor (or one no longer listed) selects just the
+ * focus row; an unlisted focus selects nothing.
+ */
+export function rangeIds(ordered: string[], anchor: string | null, focus: string): string[] {
+  const f = ordered.indexOf(focus);
+  if (f < 0) return [];
+  const a = anchor === null ? -1 : ordered.indexOf(anchor);
+  if (a < 0) return [focus];
+  const [lo, hi] = a <= f ? [a, f] : [f, a];
+  return ordered.slice(lo, hi + 1);
+}
+
+/**
+ * Apply a range to a selection: replace it, or union when additive (Ctrl
+ * held). Returns a new set.
+ */
+export function applyRange(prev: Set<string>, range: string[], additive: boolean): Set<string> {
+  const next = additive ? new Set(prev) : new Set<string>();
+  for (const id of range) next.add(id);
+  return next;
+}
+
+/**
+ * Ids the `a` key selects: every listed row not imported yet, in list
+ * order. Not-committed rows stay selectable: the batch plan skips them with
+ * a count instead of refusing one by one.
+ */
+export function notImportedIds(entries: Pick<JsonEntry, 'id'>[], imported: Set<string>): string[] {
+  return entries.filter((e) => !imported.has(e.id)).map((e) => e.id);
+}
+
+/**
+ * Minimum pointer travel (px) before a gutter hover extends the selection.
+ * Clicking a gutter opens the selection bar above the list, which shifts
+ * every row under the stationary cursor: without a threshold the synthetic
+ * enter on a neighbouring gutter drag-extends, and one click selects three
+ * rows. Rows are a full line tall, so 5px never blocks a real drag.
+ */
+export const GUTTER_DRAG_PX = 5;
+
+/** True once the pointer moved at least the drag threshold from its press point. */
+export function dragPassed(x0: number, y0: number, x1: number, y1: number, px: number = GUTTER_DRAG_PX): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  return dx * dx + dy * dy >= px * px;
+}
+
+/** The focused-element facts the confirm focus rule needs (structural, so unit-testable). */
+export type FocusCandidate = {
+  tagName: string;
+  type?: string;
+  isContentEditable?: boolean;
+};
+
+/**
+ * Whether the batch confirm may move focus to [import] once actionable.
+ * Never while the user is typing in a text field (search, an inline `to:`
+ * ask, the confirm's own base field): stealing focus mid-typing drops
+ * keystrokes. Body, list rows and buttons stay fair game, so keyboard
+ * users still land on the actionable button.
+ */
+export function mayMoveFocusToImport(active: FocusCandidate | null): boolean {
+  if (!active) return true;
+  if (active.isContentEditable) return false;
+  const tag = active.tagName.toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return false;
+  if (tag === 'INPUT') {
+    // Button-like inputs take no text; every other type (text, search, …) does.
+    return ['BUTTON', 'SUBMIT', 'RESET', 'CHECKBOX', 'RADIO', 'FILE', 'RANGE', 'COLOR', 'HIDDEN', 'IMAGE'].includes(
+      (active.type ?? 'text').toUpperCase(),
+    );
+  }
+  return true;
+}

@@ -325,6 +325,12 @@ export function importArgs(id: string, to: string): string[] {
   return dest ? [id, '--to', dest, '--json'] : [id, '--json'];
 }
 
+/** Args for `import --dry-run --json`: the plan plus its collisions; writes nothing. */
+export function importDryRunArgs(id: string, to: string): string[] {
+  const dest = to.trim();
+  return dest ? [id, '--to', dest, '--dry-run', '--json'] : [id, '--dry-run', '--json'];
+}
+
 /**
  * Where `import <id>` lands without --to, mirroring imports.mjs: skills and
  * styles go to .agents/skills/<name>, payload entries (templates) mirror at
@@ -515,6 +521,80 @@ export function quickImportError(stderrText: string): string {
     .find(Boolean);
   if (!first) return 'import failed';
   return first.length > 100 ? `${first.slice(0, 99)}…` : first;
+}
+
+// ------------------------------------------------------------------ batch import
+
+export type BatchPlan = {
+  /** Committed, not imported, default destination: imports as listed. */
+  ready: JsonEntry[];
+  /** Committed, not imported, but needs a destination (never blind). */
+  needDest: JsonEntry[];
+  /** Already imported in this project: counted, never re-imported. */
+  already: string[];
+  /** Not committed in the stack: cannot import. */
+  unimportable: string[];
+};
+
+/**
+ * Split batch candidates into ready, need-dest, already and unimportable.
+ * Bucket order follows the input. An already-imported row counts as
+ * already even when not committed (a stale lock row still blocks import).
+ */
+export function planBatch(entries: JsonEntry[], imported: Set<string>): BatchPlan {
+  const plan: BatchPlan = { ready: [], needDest: [], already: [], unimportable: [] };
+  for (const e of entries) {
+    if (imported.has(e.id)) plan.already.push(e.id);
+    else if (!e.committed) plan.unimportable.push(e.id);
+    else if (needsImportDest(e)) plan.needDest.push(e);
+    else plan.ready.push(e);
+  }
+  return plan;
+}
+
+/**
+ * Destination for a needs-dest entry under the confirm line's shared base:
+ * `<base>/<name>`, trailing slashes trimmed. An empty base means the entry
+ * is skipped, so this returns ''.
+ */
+export function batchDest(base: string, name: string): string {
+  const b = base.trim().replace(/\/+$/, '');
+  return b ? `${b}/${name}` : '';
+}
+
+/**
+ * The confirm line before a batch writes anything: `import 5`, plus the
+ * needs-dest count, the dry-run collision count and the skip count.
+ */
+export function batchConfirmText(o: { count: number; needDest: number; conflicts: number; skipped: number }): string {
+  const parts = [`import ${o.count}`];
+  if (o.needDest) parts.push(`${o.needDest} need a destination`);
+  if (o.conflicts) parts.push(`${o.conflicts} would collide`);
+  if (o.skipped) parts.push(`${o.skipped} skipped`);
+  return parts.join(' · ');
+}
+
+export type BatchCounts = {
+  imported: number;
+  already: number;
+  refused: number;
+  skipped: number;
+  stopped: boolean;
+};
+
+/**
+ * One summary line for a finished batch: `imported 5 · 1 already here ·
+ * 1 refused`, plus `· N skipped` for entries left out and `· stopped` when
+ * a cancel cut the run short. Zero buckets stay out, except the imported
+ * count, which always shows.
+ */
+export function batchSummary(c: BatchCounts): string {
+  const parts = [`imported ${c.imported}`];
+  if (c.already) parts.push(`${c.already} already here`);
+  if (c.refused) parts.push(`${c.refused} refused`);
+  if (c.skipped) parts.push(`${c.skipped} skipped`);
+  if (c.stopped) parts.push('stopped');
+  return parts.join(' · ');
 }
 
 /** Render an update --json result as display sections. */
