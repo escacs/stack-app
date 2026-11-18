@@ -19,7 +19,12 @@
 // the former answers checks with 0.1.9 and fires the startup update event,
 // the latter fails checks. A `+pick-<case>` suffix scripts the adopt folder
 // picker: matching, differing, nomatch, multi, outside, cancel
-// (e.g. `#adopt3+pick-differing,/project`).
+// (e.g. `#adopt3+pick-differing,/project`). `+grows` arms `window.__mockGrow()`,
+// which adds one skill to the catalog — call it after the first load, so the
+// browse refresh visibly picks it up. `+listfail` arms
+// `window.__mockFailLists()`, which fails later catalog lists, for the
+// refresh error state. (Triggers, not counters: onboarding itself spends
+// bare `list` calls before the first visible render.)
 (() => {
   'use strict';
 
@@ -40,6 +45,22 @@
   // cancel. Without a flag the first adoptable folder answers, else a
   // non-matching folder.
   const pickFlag = (flags.find((f) => f.startsWith('pick-')) ?? '').slice('pick-'.length) || null;
+  // Refresh fixtures, armed by scenario flag and fired by the check once
+  // the first load has rendered (see the header comment).
+  const extra = [];
+  let listsFail = false;
+  if (flags.includes('grows')) {
+    window.__mockGrow = () => {
+      if (!extra.length) {
+        extra.push({ id: 'skills/fresh-skill', usage: 'link', status: 'experimental', summary: 'Appeared after the first catalog load (mock +grows fixture).' });
+      }
+    };
+  }
+  if (flags.includes('listfail')) {
+    window.__mockFailLists = () => {
+      listsFail = true;
+    };
+  }
 
   // ---------------------------------------------------------------- catalog
   // Rendered into the exact JSON shapes of tools/stack/cli.mjs --json (and
@@ -721,8 +742,13 @@
     if (dryRun && sub !== 'import' && sub !== 'preset') {
       return errOut('--dry-run is only supported by import and preset apply');
     }
+    // Bare catalog lists only: boot's `list worker` answers even while
+    // the refresh fixture fails the catalog.
+    if (sub === 'list' && !positional[0] && listsFail) {
+      return errOut('fixture: the stack moved mid-browse (mock +listfail)');
+    }
     const catalog = [...CATALOG, ...(fx.extraCatalog ?? [])];
-    const visible = catalog.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/')));
+    const visible = [...catalog.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/'))), ...extra];
     // The pick-multi fixture needs two same-named entries; the default
     // catalog keeps unique names, so the twin only exists under the flag.
     if (pickFlag === 'multi') {

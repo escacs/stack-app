@@ -66,6 +66,8 @@ import {
   catalogs,
   buildIndex,
   byKindOrder,
+  clearCatalogs,
+  clearPreviews,
   crumbParts,
   dragPassed,
   mayMoveFocusToImport,
@@ -73,6 +75,7 @@ import {
   previewCache,
   previewKey,
   rangeIds,
+  refreshLine,
   resolveRoute,
   sameRoute,
   sourceKey,
@@ -83,6 +86,7 @@ import {
   type CrumbTarget,
   type Route,
 } from '../browseData';
+import { RefreshButton, type RefreshState } from './BrowseRefresh';
 import {
   Bar,
   Face,
@@ -188,6 +192,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   const [batchRes, setBatchRes] = createSignal<Map<string, BatchRowRes>>(new Map());
   // Ids this batch run imported, until the lock refresh makes them official.
   const [landed, setLanded] = createSignal<Set<string>>(new Set());
+  const [rs, setRs] = createSignal<RefreshState | null>(null);
   let inputEl: HTMLInputElement | undefined;
   let listGen = 0;
   // Row-import generation, bumped on navigation and project switch: an
@@ -219,6 +224,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   };
   onCleanup(clearDryTimer);
+  let rsTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearRsTimer = (): void => {
+    if (rsTimer !== undefined) {
+      clearTimeout(rsTimer);
+      rsTimer = undefined;
+    }
+  };
+  onCleanup(clearRsTimer);
   // Leaving Browse mid-batch (or mid-row-import) stops the run after the
   // current entry: the generations invalidate every later answer, like a
   // route or project change does through clearBatchState. Without this the
@@ -327,6 +340,15 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       if (s && s.phase !== 'working' && !s.expanded) setQi(null);
     }, ms);
   };
+
+  /** The refresh result clears itself after a few seconds, like an import line. */
+  const armRsTimer = (ms: number): void => {
+    clearRsTimer();
+    rsTimer = setTimeout(() => setRs(null), ms);
+  };
+
+  /** Any import op in flight: row import, batch confirm/run, or entry-page import. */
+  const importBusy = (): boolean => opsBusy() || batchBusyState(batch());
 
   const toggleQiFull = (): void => {
     const s = qi();
@@ -756,8 +778,15 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
   /**
    * Stale-while-revalidate: a cached catalog renders at once and refreshes in
    * the background; `loading…` shows only when this source has no cache yet.
+   * Returns the outcome for the refresh button (null when a newer load
+   * superseded this one); `silent` skips the full-view error, and
+   * `keepStale` leaves the current list on screen while the reload runs,
+   * so a failed refresh keeps the stale list and shows its own error line
+   * instead.
    */
-  async function load(): Promise<void> {
+  async function load(
+    opts?: { silent?: boolean; keepStale?: boolean },
+  ): Promise<{ ok: true; count: number } | { ok: false; err: string } | null> {
     const c = config();
     const key = sourceKey(c);
     const gen = ++listGen;
@@ -766,7 +795,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       setEntries(cached.entries);
       setUncommitted(cached.uncommitted);
       setLoaded(true);
-    } else {
+    } else if (!opts?.keepStale) {
       setEntries([]);
       setUncommitted(new Set<string>());
       setLoaded(false);
@@ -774,10 +803,10 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     try {
       const out = await stackRun('list', ['--json'], c?.project ?? '.', c?.stackPath);
-      if (gen !== listGen) return;
+      if (gen !== listGen) return null;
       if (cached && cached.raw === out.stdout) {
         setNote(null);
-        return;
+        return { ok: true, count: cached.entries.length };
       }
       const data = fromStackOut<ListJson>(out);
       const next: CatalogData = {
@@ -789,11 +818,45 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       setEntries(next.entries);
       setUncommitted(next.uncommitted);
       setNote(null);
+      return { ok: true, count: next.entries.length };
     } catch (err) {
-      if (gen !== listGen) return;
-      setNote(errText(err));
+      if (gen !== listGen) return null;
+      const text = errText(err);
+      if (!opts?.silent) setNote(text);
+      return { ok: false, err: text };
     } finally {
       if (gen === listGen) setLoaded(true);
+    }
+  }
+
+  /**
+   * Re-read the catalog from the checkout from scratch: drop the cached
+   * list and every cached preview, then re-run the same online
+   * `list --json` the first load uses (stale remote libraries re-sync on
+   * the way — see stackArgs.ts — so no separate remote step; a `remote
+   * sync` would only matter for remote skills, which list never fetches).
+   * The imported markers reload too. The route and scroll position stay
+   * put, and the stack path is re-read from the config only, never
+   * re-validated (that would cost extra spawns for no new information).
+   */
+  async function refresh(): Promise<void> {
+    if (rs()?.phase === 'working' || importBusy()) return;
+    clearRsTimer();
+    setRs({ phase: 'working' });
+    clearCatalogs(sourceKey(config()));
+    clearPreviews();
+    const r = await load({ silent: true, keepStale: true });
+    if (!r) {
+      setRs(null);
+      return;
+    }
+    if (r.ok) {
+      await refreshLock();
+      setRs({ phase: 'done', line: refreshLine(r.count) });
+      armRsTimer(8000);
+    } else {
+      setRs({ phase: 'error', err: r.err });
+      armRsTimer(15000);
     }
   }
 
@@ -882,6 +945,13 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           return;
         }
       }
+      // `r` re-reads the catalog from the checkout. Like `i`, text fields
+      // keep it; unlike `i` it needs no cursor row.
+      if (ev.key === 'r' && t !== inputEl) {
+        ev.preventDefault();
+        void refresh();
+        return;
+      }
       // Space toggles the cursor row; with no cursor row it keeps scrolling.
       if (ev.key === ' ') {
         const e = t !== inputEl ? selEntry() : null;
@@ -960,6 +1030,8 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       () => config()?.project ?? null,
       () => {
         untrack(clearBatchState);
+        clearRsTimer();
+        setRs(null);
       },
       { defer: true },
     ),
@@ -1012,6 +1084,7 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           spellcheck={false}
           onInput={(e) => setQ(e.currentTarget.value)}
         />
+        <RefreshButton state={rs()} disabled={importBusy()} onRefresh={() => void refresh()} />
       </div>
       <BatchBar
         batch={batch()}
@@ -1625,7 +1698,7 @@ function QiAsk(props: {
 
 /** Dim key hint under every browse list (never in the entry detail). */
 function ListHint() {
-  return <p class="dimtxt listhint">↑↓ move · shift extend · i import · space select · a all</p>;
+  return <p class="dimtxt listhint">↑↓ move · shift extend · i import · space select · a all · r refresh</p>;
 }
 
 /** Flat entry list: the kind view, the `all` list and search results. */

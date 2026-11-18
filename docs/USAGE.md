@@ -172,11 +172,18 @@ Any other route shows `(o_O) not found`.
 
 Browse is the stack's catalog, on its own screen. The prompt line shows
 where you are — the trail starts at the catalog name — and the search box
-follows it.
+follows it, with a quiet `[refresh]` at the line's right end.
 
 ```
-stack/skills/file-pr  ›  type to search
+stack/skills/file-pr  ›  type to search  [refresh]
 ```
+
+`[refresh]` (or `r`) re-reads the catalog from the stack checkout from
+scratch, after the checkout changed out from under the app — a `git pull`
+in the stack, a new skill, updated remotes — without restarting. It keeps
+the current route and scroll position, then says `refreshed · 93 entries`
+(or shows the error inline, keeping the stale list). It stays disabled
+while an import runs.
 
 ### Home
 
@@ -420,6 +427,7 @@ batch — runs at a time.
 | `i` | import the cursor row in place (lists only; never inside a text field) |
 | `Space` | select the cursor row (lists only). With no cursor row, scroll down about 80% of a page when the search box is empty |
 | `a` | select every not-imported row in the list (needs the cursor on the list, like `i`; otherwise types into the search) |
+| `r` | refresh the catalog from the stack checkout (never inside a text field) |
 | `Escape` | cancel a batch confirm or run, dismiss a summary, clear the selection, clear the search, or go up one level, in that order |
 | letter or digit | focus the search box and type into it |
 
@@ -698,3 +706,8 @@ matches, so the id field shows), `multi` (two same-named entries), `outside`
 (rejected like a real outside pick) and `cancel` (quiet, as if dismissed).
 Without a suffix the picker returns the first adoptable folder, else a
 non-matching folder.
+
+A `+grows` suffix arms `window.__mockGrow()`, which adds one skill to the
+catalog — call it after the first load, so the browse `[refresh]` visibly
+picks it up. `+listfail` arms `window.__mockFailLists()`, which fails
+later catalog lists, for the refresh error state.
