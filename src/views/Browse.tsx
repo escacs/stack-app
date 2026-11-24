@@ -1,15 +1,16 @@
-// Browse + import, ported from the website's browse (stack/web/app.js): kind
-// rows with ascii bars, entry rows with dotted leaders, search, file tree
-// and rendered docs. Data comes through stack_run as --json; file bodies
-// and images arrive via `show --file` (the web fetches them as URLs).
-// Desktop additions, kept visually quiet: the import section, git-state
-// markers on rows, inline row imports ([import] on hover/selection, `i`),
-// batch imports ([import all N] per list and library group, multi-select
-// with a shared action bar, one dry-run confirm and one summary), the /all
-// route (the site links * all at #/search/), and click-only meta/preview
-// links (the keyboard walks the tree files).
-// Pure logic (routes, crumbs, catalog index, fetch cache) is in ../browseData.
-import type { JSX } from 'solid-js';
+// Browse: the catalog as a full-width list. Each row carries an Open and an
+// Import button; the list is dominant and nothing is previewed until asked.
+// Open (button, double-click, Enter, `o`) puts the entry in the route
+// (#…/browse/<kind>/<id>) and the view becomes list + detail; Close or Esc
+// returns to the full list. Selection is the file-list model, with no mode: a
+// click selects a row, Ctrl/Shift extend it, and 2+ selected rows turn the
+// filter row into an Import N bar. Importing always goes through the file-level
+// import plan (ImportPlan): inside the detail when that entry is open, in a
+// dialog otherwise. Confirm writes, and the plan is cleared afterwards with
+// the Undo toast left in place. Hotkeys (/ j k o i a r space Esc, Ctrl+A) keep
+// working; under 900px the detail takes over the sheet with a back button.
+// Pure logic: ../browseData (routes, cache), ../browseList (filter, sort,
+// match marks), ../plan (the plan tree).
 import {
   For,
   Match,
@@ -23,116 +24,100 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import { errText, stackRun, type AppConfig } from '../bridge';
+import { errText, stackRun } from '../bridge';
 import { href } from '../router';
-import { fmtBytes, kindOf, pluralOf } from '../parse';
+import { Portal } from 'solid-js/web';
+import { Modal } from '../dialog';
+import { pluralOf } from '../parse';
 import { moveSel } from '../onboard';
-import { scrollByPage, scrollRowIntoView, scrollToTop } from '../smooth';
+import { scrollByPage, scrollToTop } from '../smooth';
 import {
-  batchConfirmText,
   batchDest,
   batchSummary,
   defaultImportDest,
-  describeImport,
-  entryMarkers,
   fromStackOut,
   importArgs,
   importDestHint,
-  importDryRunArgs,
   needsImportDest,
   planBatch,
   previewFresh,
-  quickImportError,
-  quickImportLine,
-  refusalFiles,
-  showFileArgs,
-  toShowDoc,
-  toShowFile,
   type BatchCounts,
   type BatchPlan,
-  type ImportDryRunJson,
   type ImportJson,
   type JsonEntry,
   type ListJson,
-  type OpSection,
-  type ShowFile,
-  type ShowFileJson,
-  type ShowJson,
 } from '../json';
 import { config, lock, refreshLock, refreshReport } from '../store';
-import { CliErr, Empty, Markers, OpResult } from '../ui';
+import { t3Info } from '../t3';
+import { LABEL } from '../vocab';
+import { Alert, Button, CliErr, FilterMenu, IconButton, LinkButton, TechDetails } from '../ui';
+import { Icon } from '../icons';
+import { rovingBar } from '../roving';
+import { useAction } from '../actions';
+import { toastFailure, toastOutcome } from '../mutations';
+import { pushToast } from '../toast';
+import { batchOutcome, importOutcome } from '../undo';
+import { mapPooled } from '../adopt';
 import {
-  applyRange,
-  catalogs,
   buildIndex,
-  byKindOrder,
+  catalogs,
   clearCatalogs,
   clearPreviews,
-  crumbParts,
-  dragPassed,
-  mayMoveFocusToImport,
   notImportedIds,
-  previewCache,
-  previewKey,
-  rangeIds,
+  pruneSelection,
+  selectClick,
   refreshLine,
   resolveRoute,
   sameRoute,
   sourceKey,
-  toggleSelected,
-  whenVisible,
   type CatalogData,
   type CatalogIndex,
-  type CrumbTarget,
   type Route,
+  crumbParts,
+  librarySeg,
+  upRoute,
 } from '../browseData';
-import { RefreshButton, type RefreshState } from './BrowseRefresh';
 import {
-  Bar,
-  Face,
-  FileTree,
-  IMG_RE,
-  Legend,
-  Markdown,
-  Sprite,
-  fileRowOrder,
-  groupComponents,
-  kindAgg,
-  libraryMeta,
-  mimeFor,
-  scoreEntries,
-  type LibraryGroup,
-} from '../site';
-
-type Agg = ReturnType<typeof kindAgg>;
-type Doc = ReturnType<typeof toShowDoc>;
-type FileBody = ReturnType<typeof toShowFile>;
-
-/**
- * One inline row import at a time, keyed by entry id. `done` keeps the full
- * sections for the click-to-expand log (no → project link: that stays on the
- * entry page); `error` keeps the stderr plus its look-alike list, if any.
- */
-type QiState =
-  | { id: string; phase: 'working' }
-  | { id: string; phase: 'done'; line: string; sections: OpSection[]; expanded: boolean }
-  | { id: string; phase: 'error'; line: string; err: string; lookalikes: string[]; expanded: boolean };
+  CHIPS,
+  chipCounts,
+  filterEntries,
+  indexOfEntry,
+  inKind,
+  inLibrary,
+  matchesOutsideScope,
+  searchEscape,
+  searchPlaceholder,
+  routeSelection,
+  sortEntries,
+  toggleChip,
+  type ChipKey,
+} from '../browseList';
+import { collidingTargets, mergePlans, runnable, type Plan } from '../plan';
+import { humanizeCliError, nameOf, oneSentence } from '../humanize';
+import { clearListings, planImport } from '../planLoad';
+import { readImportedAt, recordImported } from '../remember';
+import { publishCatalog, publishQuery, publishScope } from '../catalog';
+import { scoreEntries } from '../site';
+import { refreshErrorText, RefreshButton, type RefreshState } from './BrowseRefresh';
+import { EntryRow } from './EntryRow';
+import { FolderRow } from './FolderRow';
+import { expandFolder, folderChecked, folderImport, folderKey, foldersTouched, listRows, rowIds, selectionLabel, type Folder, type ListRow } from '../folders';
+import { EntryPreview } from './EntryPreview';
+import { ImportPlan, type PlanView } from './ImportPlan';
+import { PresetList } from './PresetList';
+import { ensurePresets } from '../presets';
 
 /** One planned batch import: '' dest means the CLI default. */
 type BatchTarget = { id: string; dest: string };
 
-/** A per-entry dry-run outcome: its collisions, or the dry-run's own error. */
-type DryOutcome = { conflicts: string[] } | { error: string };
-const dryConflicts = (d: DryOutcome): string[] => ('conflicts' in d ? d.conflicts : []);
-
-/** A refused batch entry, with the same details as a failed row import. */
-type BatchRefusal = { id: string; line: string; err: string; lookalikes: string[] };
+/** A refused batch entry, with the same details as a failed single import. */
+type BatchRefusal = { id: string; line: string; err: string };
 
 /**
- * Batch import state: a dry-run confirm line first (nothing written yet),
- * then the sequential run, then the summary. `label` names the scope
- * (`components/react`, or `3 selected`). Only one batch runs at a time, and
- * never beside a row import.
+ * Batch import state: the file plan first (nothing written yet), then the
+ * sequential run, then the summary. `label` names the scope (`skills`, or
+ * `3 selected`). Only one batch runs at a time, and never beside a single
+ * import.
  */
 type BatchState =
   | {
@@ -141,30 +126,35 @@ type BatchState =
       plan: BatchPlan;
       base: string;
       targets: BatchTarget[];
-      dry: Map<string, DryOutcome>;
-      checking: boolean;
-      expanded: boolean;
+      /** Each requested entry's own plan (with its dependencies), for the skip rule. */
+      per: Map<string, Plan>;
+      /** Entries whose dry run failed, with the reason in plain words. */
+      errs: Map<string, string>;
+      /** A folder typed for one colliding entry (key present: its controls stay up). */
+      dests: Map<string, string>;
+      /** Entries the user chose to skip. */
+      skip: Set<string>;
+      view: PlanView;
     }
   | { phase: 'running'; label: string; targets: BatchTarget[]; at: number; counts: BatchCounts; cancel: boolean }
   | { phase: 'done'; label: string; counts: BatchCounts; refusals: BatchRefusal[]; expanded: boolean };
 
-/** Per-row batch results, rendered exactly like the row-import results. */
-type BatchRowRes =
-  | { phase: 'working' }
-  | { phase: 'done'; line: string; sections: OpSection[]; expanded: boolean }
-  | { phase: 'error'; line: string; err: string; lookalikes: string[]; expanded: boolean };
+/** A single-entry import plan: the destination being edited, what the dry run found, a failed attempt. */
+type Single = { id: string; dest: string; view: PlanView; failure: string | null; running: boolean };
 
 const batchConfirm = (b: BatchState | null) => (b?.phase === 'confirm' ? b : null);
 const batchRunning = (b: BatchState | null) => (b?.phase === 'running' ? b : null);
 const batchDone = (b: BatchState | null) => (b?.phase === 'done' ? b : null);
-/** A batch holds the op lock while it confirms or runs; a summary does not. */
 const batchBusyState = (b: BatchState | null): boolean => b?.phase === 'confirm' || b?.phase === 'running';
 
+/** The entries of a batch that would really be written: no failed dry run, no collision. */
+const runnableTargets = (b: Pick<Extract<BatchState, { phase: 'confirm' }>, 'targets' | 'per' | 'errs' | 'skip'>): BatchTarget[] =>
+  runnable(b.targets, b.per, b.errs).filter((t) => !b.skip.has(t.id));
+
 /**
- * In-flight import ops, across navigation: a route change clears the row and
+ * In-flight import ops, across navigation: a route change clears the plan and
  * batch UI state but not the CLI call in flight, so the one-op-at-a-time
  * guard needs a counter that survives both navigation and remounts.
- * quickImport, runBatch and the entry-page import all hold it while they run.
  */
 let opsInFlight = 0;
 const [opsBusy, setOpsBusy] = createSignal(false);
@@ -177,53 +167,44 @@ const endOp = (): void => {
   if (!opsInFlight) setOpsBusy(false);
 };
 
+const NARROW = '(max-width: 899.98px)';
+const SINGLE_DEBOUNCE_MS = 350;
+
 export default function Browse(props: { scenario: string; segs: string[] }) {
   const [entries, setEntries] = createSignal<JsonEntry[]>([]);
-  const [uncommitted, setUncommitted] = createSignal<Set<string>>(new Set());
   const [note, setNote] = createSignal<string | null>(null);
   const [loaded, setLoaded] = createSignal(false);
   const [q, setQ] = createSignal('');
-  const [sel, setSel] = createSignal(-1);
-  const [entryFiles, setEntryFiles] = createSignal<ShowFile[]>([]);
-  const [qi, setQi] = createSignal<QiState | null>(null);
-  const [qiAsk, setQiAsk] = createSignal<{ id: string; value: string } | null>(null);
+  const [chips, setChips] = createSignal<ReadonlySet<ChipKey>>(new Set<ChipKey>());
+  // The cursor is an entry id, so filters and sorts that move rows keep it on the same entry.
+  const [curId, setCurId] = createSignal<string | null>(null);
+  // Ids of the selected rows (a folder row stands for its pickable members); `anchor` is the row key ranges start from.
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [batch, setBatch] = createSignal<BatchState | null>(null);
-  const [batchRes, setBatchRes] = createSignal<Map<string, BatchRowRes>>(new Map());
-  // Ids this batch run imported, until the lock refresh makes them official.
+  const [single, setSingle] = createSignal<Single | null>(null);
+  // Ids this run imported, until the lock refresh makes them official.
   const [landed, setLanded] = createSignal<Set<string>>(new Set());
   const [rs, setRs] = createSignal<RefreshState | null>(null);
+  const [narrow, setNarrow] = createSignal(typeof matchMedia === 'function' && matchMedia(NARROW).matches);
+  const [announce, setAnnounce] = createSignal('');
+  const [importedAt, setImportedAt] = createSignal<Map<string, number>>(new Map());
   let inputEl: HTMLInputElement | undefined;
+  let listEl: HTMLDivElement | undefined;
   let listGen = 0;
-  // Row-import generation, bumped on navigation and project switch: an
-  // import resolving afterwards is stale and must not land (see previewFresh).
-  // The batch loop and the dry runs carry it too, for the same reason.
+  // Import generation, bumped on navigation and project switch: an import
+  // resolving afterwards is stale and must not land (see previewFresh).
   let qiGen = 0;
-  // Shift-select anchor (last toggled or cursor row) and the gutter drag flag.
+  // Plan generation: an edit or a new plan restarts the dry runs, older answers drop.
+  let planGen = 0;
   let anchor: string | null = null;
-  let dragging = false;
-  // Gutter press point: hover extends the selection only past the drag
-  // threshold, so the bar-shift under a stationary cursor never extends.
-  let dragX = 0;
-  let dragY = 0;
-  // Dry-run generation: a base edit restarts the dry runs, older answers drop.
-  let dryGen = 0;
-  let qiTimer: ReturnType<typeof setTimeout> | undefined;
-  const clearQiTimer = (): void => {
-    if (qiTimer !== undefined) {
-      clearTimeout(qiTimer);
-      qiTimer = undefined;
+  let planTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearPlanTimer = (): void => {
+    if (planTimer !== undefined) {
+      clearTimeout(planTimer);
+      planTimer = undefined;
     }
   };
-  onCleanup(clearQiTimer);
-  let dryTimer: ReturnType<typeof setTimeout> | undefined;
-  const clearDryTimer = (): void => {
-    if (dryTimer !== undefined) {
-      clearTimeout(dryTimer);
-      dryTimer = undefined;
-    }
-  };
-  onCleanup(clearDryTimer);
+  onCleanup(clearPlanTimer);
   let rsTimer: ReturnType<typeof setTimeout> | undefined;
   const clearRsTimer = (): void => {
     if (rsTimer !== undefined) {
@@ -232,326 +213,447 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   };
   onCleanup(clearRsTimer);
-  // Leaving Browse mid-batch (or mid-row-import) stops the run after the
-  // current entry: the generations invalidate every later answer, like a
-  // route or project change does through clearBatchState. Without this the
-  // loop would keep importing with no UI and no cancel.
+  // Leaving Browse mid-batch stops the run after the current entry.
   onCleanup(() => {
     qiGen++;
-    dryGen++;
+    planGen++;
+  });
+
+  onMount(() => {
+    if (typeof matchMedia !== 'function') return;
+    const mq = matchMedia(NARROW);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    onCleanup(() => mq.removeEventListener('change', on));
   });
 
   // Changes only when the project or stack checkout does, never on config edits.
   const source = createMemo(() => sourceKey(config()));
-  // Identity holds while the route is the same, so route-keyed views survive list refreshes.
+  const project = (): string | null => config()?.project ?? null;
+  createEffect(() => setImportedAt(readImportedAt(project())));
   const route = createMemo<Route>(() => resolveRoute(props.segs, entries()), { kind: 'home' }, { equals: sameRoute });
-  const searching = createMemo(() => q().trim().length > 0);
+  /** The Presets kind: bundles of entries, listed in the same full-width list. */
+  const presetsMode = createMemo(() => route().kind === 'presets');
+  const routeSel = createMemo(() => routeSelection(route(), entries()));
+  const routeKey = createMemo(() => `${routeSel().kind ?? ''}|${routeSel().library ?? ''}|${routeSel().entryId ?? ''}`);
   const index = createMemo<CatalogIndex>(() => buildIndex(entries()));
-  const agg = createMemo<Agg>(() => kindAgg(entries()));
-  const allSorted = createMemo(() => [...entries()].sort(byKindOrder));
-  const found = createMemo(() => scoreEntries(entries(), q()));
-  const kindList = createMemo(() => {
-    const r = route();
-    return r.kind === 'kind' ? entries().filter((e) => e.kind === r.kindSingular) : [];
+  /** The entry whose detail is open: the one the route names. */
+  const openEntry = createMemo((): JsonEntry | null => (routeSel().entryId && !routeSel().missing ? (index().byId.get(routeSel().entryId as string) ?? null) : null));
+  /**
+   * The kind the list is scoped to. Opening an entry keeps the scope the list
+   * had (All stays All); a deep link to an entry scopes to its kind.
+   */
+  const listKind = createMemo<string | null | undefined>(
+    (prev) => (routeSel().entryId ? (prev === undefined ? (routeSel().kind ?? undefined) : prev) : routeSel().kind),
+    undefined,
+  );
+  /** The component library folder the list is scoped to (kept while an entry is open, like the kind). */
+  const listLibrary = createMemo<string | null>((prev) => (routeSel().entryId ? (listKind() === 'component' ? prev : null) : routeSel().library), null);
+  const kind = (): string | null => listKind() ?? null;
+  const library = (): string | null => (kind() === 'component' ? listLibrary() : null);
+  createEffect(() => publishCatalog(entries()));
+  createEffect(() => publishQuery(q()));
+  onCleanup(() => publishQuery(''));
+  createEffect(() => publishScope(presetsMode() ? 'presets' : listKind() === undefined ? undefined : listKind() ? pluralOf(listKind() as string) : ''));
+  createEffect(() => void ensurePresets(config()));
+  onCleanup(() => publishScope(undefined));
+  const searching = createMemo(() => q().trim().length > 0);
+  const importedIds = createMemo(() => new Set(lock().rows.map((r) => r.id)));
+  const isImported = (id: string): boolean => importedIds().has(id) || landed().has(id);
+
+  /** The catalog narrowed by the sidebar's kind, before chips, search and sort. */
+  const scoped = createMemo(() => (presetsMode() ? [] : inLibrary(inKind(entries(), kind()), library())));
+  const allMatches = createMemo(() => (searching() ? scoreEntries(entries(), q()) : []));
+  const elsewhere = createMemo(() => matchesOutsideScope(allMatches(), kind(), library()));
+  const base = createMemo(() => (searching() ? scoreEntries(scoped(), q()) : sortEntries(scoped(), 'name', importedAt())));
+  const visible = createMemo(() => filterEntries(base(), chips()));
+  const counts = createMemo(() => chipCounts(base()));
+  /**
+   * Components at the root, with nothing searched, list their libraries as
+   * folders; everything else (a library's members, search results, All
+   * entries, other kinds) is a flat list of entries.
+   */
+  const folderMode = createMemo(() => !presetsMode() && kind() === 'component' && !library() && !searching());
+  const rows = createMemo<ListRow[]>(() => listRows(visible(), folderMode()));
+  const folderRows = createMemo<Folder[]>(() => rows().flatMap((r) => (r.kind === 'folder' ? [r.folder] : [])));
+  const selIdx = createMemo(() => {
+    const key = curId();
+    const i = key ? rows().findIndex((r) => r.key === key) : -1;
+    return i >= 0 ? i : rows().length ? 0 : -1;
   });
-  const grouped = createMemo(() => {
-    const r = route();
-    return r.kind === 'kind' && r.kindSingular === 'component' ? groupComponents(kindList()) : null;
-  });
-  // The flat list shown for search, `all` and non-component kinds. One list
-  // view serves all three, so rows that stay in view survive a switch.
-  const listed = createMemo<JsonEntry[] | null>(() => {
-    if (searching()) return found();
-    const r = route();
-    if (r.kind === 'all') return allSorted();
-    if (r.kind === 'kind' && !grouped()) return kindList();
-    return null;
-  });
-  const byId = (): boolean => searching() || route().kind === 'all';
-  const entryId = (): string => {
-    const r = route();
-    return r.kind === 'entry' ? r.id : '';
+  const cursorRow = (): ListRow | null => rows()[selIdx()] ?? null;
+  const cursorEntry = (): JsonEntry | null => {
+    const r = cursorRow();
+    return r?.kind === 'entry' ? r.entry : null;
   };
-  const entryFile = (): string | null => {
-    const r = route();
-    return r.kind === 'entry' ? r.file : null;
+  const cursorFolder = (): Folder | null => {
+    const r = cursorRow();
+    return r?.kind === 'folder' ? r.folder : null;
   };
+  /** The open folder's members, as the Import all in the list header sees them. */
+  const openImport = createMemo(() => folderImport(visible(), isImported));
+  /** What the single-entry actions (palette, `i`) act on: the open entry, else the cursor row. */
+  const targetEntry = (): JsonEntry | null => openEntry() ?? cursorEntry();
+  const routeFile = (): string | null => {
+    const r = route();
+    return r.kind === 'entry' && r.id === openEntry()?.id ? r.file : null;
+  };
+  const filtering = () => chips().size > 0 || searching();
 
   const entryHref = (id: string): string => href(props.scenario, 'browse', ...id.split('/'));
-  const kindHref = (kind: string): string =>
-    kind ? href(props.scenario, 'browse', pluralOf(kind)) : href(props.scenario, 'browse');
-  const allHref = (): string => href(props.scenario, 'browse', 'all');
+  const kindHref = (kind: string, lib: string | null = null): string =>
+    kind ? href(props.scenario, 'browse', pluralOf(kind), ...(lib ? [librarySeg(lib)] : [])) : href(props.scenario, 'browse');
   const fileHref = (id: string, file: string): string =>
     href(props.scenario, 'browse', ...id.split('/'), ...file.split('/'));
-  const targetHref = (t: CrumbTarget | null): string | null => {
-    if (!t) return null;
-    if (t.to === 'home') return kindHref('');
-    if (t.to === 'kind') return kindHref(t.kindSingular);
-    return entryHref(t.id);
+
+  const importBusy = (): boolean => opsBusy() || batchBusyState(batch()) || !!single()?.running;
+
+  const focusList = (): void => listEl?.focus({ preventScroll: true });
+  /** Open an entry's detail: a route change, so Back and reload work. */
+  const openDetail = (e: JsonEntry): void => {
+    setCurId(e.id);
+    if (openEntry()?.id === e.id) return;
+    location.hash = entryHref(e.id);
+  };
+  /** Back to the full-width list, in the scope it had. */
+  const closeDetail = (): void => {
+    location.hash = kindHref(kind() ? (kind() as string) : '', library());
+    focusList();
   };
 
-  // Navigable rows for the keyboard cursor, like the web's [data-nav].
-  const navRows = createMemo<{ href: string }[]>(() => {
-    if (searching()) return found().map((e) => ({ href: entryHref(e.id) }));
-    const r = route();
-    if (r.kind === 'home') {
-      return [...agg().stats.map((s) => ({ href: kindHref(s.kind) })), { href: allHref() }];
-    }
-    if (r.kind === 'all') return allSorted().map((e) => ({ href: entryHref(e.id) }));
-    if (r.kind === 'kind') {
-      // Components render grouped by library; the keyboard walks the same order.
-      const g = grouped();
-      const ordered = g ? [...g.groups.flatMap((x) => x.members), ...g.ungrouped] : kindList();
-      return ordered.map((e) => ({ href: entryHref(e.id) }));
-    }
-    if (r.kind === 'entry') return fileRowOrder(entryFiles()).map((p) => ({ href: fileHref(r.id, p) }));
-    return [];
-  });
+  // ------------------------------------------------------------------ cursor
 
-  const crumbs = createMemo(() =>
-    crumbParts(route(), searching()).map((p) => ({ label: p.label, href: targetHref(p.target) })),
+  const setCursor = (i: number): void => {
+    const r = rows()[i];
+    if (r) setCurId(r.key);
+  };
+  /**
+   * Move the cursor to row `i`. `follow` selects just that row (single-select
+   * follows focus, like Finder); `extend` / `add` grow a range from the anchor
+   * (Shift, Ctrl+Shift); `keep` leaves the selection alone (Ctrl+Arrow).
+   */
+  const moveTo = (i: number, how: 'follow' | 'extend' | 'add' | 'keep'): void => {
+    const before = curKey();
+    setCursor(i);
+    const to = rows()[i]?.key;
+    if (to && how !== 'keep') selectRow(to, how === 'follow' ? { shift: false, ctrl: false } : { shift: true, ctrl: how === 'add' }, before);
+    // With a detail open it follows the cursor (same history slot).
+    const e = cursorEntry();
+    if (openEntry() && e && e.id !== openEntry()?.id) location.replace(entryHref(e.id));
+  };
+  const move = (delta: number, how: 'follow' | 'extend' | 'add' | 'keep' = 'follow'): void => moveTo(moveSel(selIdx(), delta, rows().length), how);
+
+  // Keep the cursor row in view inside the list pane.
+  createEffect(
+    on(selIdx, (i) => {
+      if (i < 0) return;
+      document.getElementById(`opt-${i}`)?.scrollIntoView({ block: 'nearest' });
+    }, { defer: true }),
   );
 
-  const importedIds = createMemo(() => new Set(lock().rows.map((r) => r.id)));
+  // One calm announcement per pause of the cursor, not one per keypress.
+  let announceTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => announceTimer && clearTimeout(announceTimer));
+  createEffect(
+    on(
+      () => cursorRow()?.key ?? null,
+      (id) => {
+        if (announceTimer) clearTimeout(announceTimer);
+        announceTimer = setTimeout(() => {
+          const e = untrack(cursorEntry);
+          const f = untrack(cursorFolder);
+          const n = untrack(rows).length;
+          if (id && f) return setAnnounce(`${f.name}, folder, ${f.members.length} components. ${untrack(selIdx) + 1} of ${n}.`);
+          if (!id || !e) return setAnnounce('');
+          setAnnounce(`${e.name}, ${e.kind}${isImported(e.id) ? ', imported' : ''}. ${untrack(selIdx) + 1} of ${n}.`);
+        }, 400);
+      },
+    ),
+  );
 
-  /** Listed entries in row order, for the cursor, selection and batch runs. Empty off the lists. */
-  const orderedEntries = (): JsonEntry[] => {
-    if (searching()) return found();
-    const r = route();
-    if (r.kind === 'all') return allSorted();
-    if (r.kind === 'kind') {
-      const g = grouped();
-      return g ? [...g.groups.flatMap((x) => x.members), ...g.ungrouped] : kindList();
-    }
-    return [];
-  };
+  // Moving the cursor off an entry closes its open plan: the plan is for that entry.
+  createEffect(
+    on(
+      () => cursorEntry()?.id ?? null,
+      (id) => {
+        const s = untrack(single);
+        if (s && s.id !== id && !s.running) cancelSingle(false);
+      },
+      { defer: true },
+    ),
+  );
 
-  /** The entry under the keyboard cursor, when the cursor is on an entry row. */
-  const selEntry = (): JsonEntry | null => {
-    const i = sel();
-    return i < 0 ? null : (orderedEntries()[i] ?? null);
-  };
+  // ------------------------------------------------------------------ single import plan
 
-  /** A result line clears itself after a few seconds, unless expanded. */
-  const armQiTimer = (ms: number): void => {
-    clearQiTimer();
-    qiTimer = setTimeout(() => {
-      const s = qi();
-      if (s && s.phase !== 'working' && !s.expanded) setQi(null);
-    }, ms);
-  };
+  const entryOf = (id: string): JsonEntry | undefined => index().byId.get(id);
 
-  /** The refresh result clears itself after a few seconds, like an import line. */
-  const armRsTimer = (ms: number): void => {
-    clearRsTimer();
-    rsTimer = setTimeout(() => setRs(null), ms);
-  };
-
-  /** Any import op in flight: row import, batch confirm/run, or entry-page import. */
-  const importBusy = (): boolean => opsBusy() || batchBusyState(batch());
-
-  const toggleQiFull = (): void => {
-    const s = qi();
-    if (!s || s.phase === 'working') return;
-    clearQiTimer();
-    setQi({ ...s, expanded: !s.expanded });
-    if (s.expanded) armQiTimer(8000);
-  };
-
-  /**
-   * Import straight from a row: one click with the default destination, no
-   * navigation. Entries needing a destination open the inline `to` field
-   * instead; `dest` set means that field was confirmed. Like the entry
-   * page, a success refreshes the lock, the report and the catalog.
-   */
-  async function quickImport(e: JsonEntry, dest?: string): Promise<void> {
-    if (qi()?.phase === 'working' || batchBusyState(batch()) || opsBusy()) return;
+  async function loadSinglePlan(): Promise<void> {
+    const s = single();
     const c = config();
-    if (!c?.project) return;
-    if (importedIds().has(e.id) || !e.committed) return;
-    // A fresh row import retires a finished batch summary and its row lines.
-    if (batchDone(batch())) {
-      setBatch(null);
-      setBatchRes(new Map());
-    }
-    if (dest === undefined && needsImportDest(e)) {
-      if (qiAsk()?.id !== e.id) {
-        clearQiTimer();
-        setQi(null);
-        setQiAsk({ id: e.id, value: importDestHint(e) ?? '' });
-      }
+    if (!s || !c?.project) return;
+    const e = entryOf(s.id);
+    const dest = s.dest.trim();
+    if (e && needsImportDest(e) && !dest) {
+      setSingle({ ...s, view: { phase: 'idle', text: 'Choose a folder inside the project to import into.' } });
       return;
     }
-    clearQiTimer();
-    setQiAsk(null);
-    const gen = qiGen;
-    setQi({ id: e.id, phase: 'working' });
-    beginOp();
+    const gen = ++planGen;
+    const qgen = qiGen;
+    setSingle({ ...s, view: { phase: 'loading' } });
     try {
-      const out = await stackRun('import', importArgs(e.id, dest ?? ''), c.project, c.stackPath);
-      if (!previewFresh(gen, qiGen)) return endOp();
-      const r = fromStackOut<ImportJson>(out);
-      setQi({ id: e.id, phase: 'done', line: quickImportLine(r, e.id), sections: describeImport(r), expanded: false });
-      // A single-row bar import delegates here: the row is imported, so it
-      // leaves the selection instead of stranding `1 selected`.
-      setSelected((prev) => {
-        if (!prev.has(e.id)) return prev;
-        const next = new Set(prev);
-        next.delete(e.id);
-        return next;
-      });
-      await refreshLock();
-      // Import creates stack.toml implicitly: the project page's set-up slot
-      // must re-check on the next visit.
-      await refreshReport();
-      // Same staleness gap as the batch tail: a navigation during the final
-      // refresh must not re-arm or reload here; the op still ends.
-      if (!previewFresh(gen, qiGen)) return endOp();
-      void load();
-      armQiTimer(8000);
-      endOp();
+      const plan = await planImport({ project: c.project, stackPath: c.stackPath }, s.id, dest);
+      if (gen !== planGen || !previewFresh(qgen, qiGen)) return;
+      setSingle((cur) => (cur && cur.id === s.id ? { ...cur, view: { phase: 'ready', plan } } : cur));
     } catch (err) {
-      if (!previewFresh(gen, qiGen)) return endOp();
-      const text = errText(err);
-      const lookalikes = refusalFiles(text);
-      setQi({
-        id: e.id,
-        phase: 'error',
-        line: quickImportError(text),
-        err: text,
-        lookalikes,
-        expanded: false,
-      });
-      // A look-alike refusal on a skill or style is a dead end without a
-      // destination field, so offer the same inline `to` the row opens for
-      // components, prefilled with the default destination.
-      if (lookalikes.length && (e.kind === 'skill' || e.kind === 'style')) {
-        setQiAsk({ id: e.id, value: defaultImportDest(e) });
-      }
-      armQiTimer(15000);
-      endOp();
+      if (gen !== planGen || !previewFresh(qgen, qiGen)) return;
+      setSingle((cur) => (cur && cur.id === s.id ? { ...cur, view: { phase: 'error', text: errText(err) } } : cur));
     }
   }
 
-  const confirmQiAsk = (): void => {
-    const a = qiAsk();
-    if (!a) return;
-    const dest = a.value.trim();
-    if (!dest) return;
-    const e = index().byId.get(a.id);
-    if (e) void quickImport(e, dest);
+  /** Open the plan for one entry: what an import writes, and where. */
+  function openPlan(e: JsonEntry, dest?: string): void {
+    if (importBusy() || !config()?.project) return;
+    if (isImported(e.id) || !e.committed) return;
+    if (batchDone(batch())) setBatch(null);
+    clearPlanTimer();
+    setCurId(e.id);
+    setSingle({
+      id: e.id,
+      dest: dest ?? (needsImportDest(e) ? (importDestHint(e) ?? '') : ''),
+      view: { phase: 'loading' },
+      failure: null,
+      running: false,
+    });
+    void loadSinglePlan();
+  }
+
+  const onSingleDest = (value: string): void => {
+    const s = single();
+    if (!s || s.running) return;
+    setSingle({ ...s, dest: value, failure: null });
+    clearPlanTimer();
+    planTimer = setTimeout(() => void loadSinglePlan(), SINGLE_DEBOUNCE_MS);
   };
+
+  function cancelSingle(refocus = true): void {
+    clearPlanTimer();
+    planGen++;
+    setSingle(null);
+    if (refocus) focusList();
+  }
+
+  async function confirmSingle(): Promise<void> {
+    const s = single();
+    const c = config();
+    if (!s || !c?.project || s.running || opsBusy()) return;
+    const e = entryOf(s.id);
+    clearPlanTimer();
+    planGen++;
+    const gen = qiGen;
+    setSingle({ ...s, running: true, failure: null });
+    beginOp();
+    try {
+      const out = await stackRun('import', importArgs(s.id, s.dest), c.project, c.stackPath);
+      if (!previewFresh(gen, qiGen)) return endOp();
+      const r = fromStackOut<ImportJson>(out);
+      toastOutcome(importOutcome(r, s.id), { project: c.project, stackPath: c.stackPath });
+      recordImported(c.project, r.imported.map((p) => p.id));
+      setImportedAt(readImportedAt(c.project));
+      // Cleared at once: the plan was for this import.
+      setSingle(null);
+      // A finished plan clears the selection.
+      setSelected(new Set<string>());
+      anchor = null;
+      if (e) setLanded((prev) => new Set<string>(prev).add(s.id));
+      await refreshLock();
+      // Import creates stack.toml implicitly: the project page's set-up slot must re-check.
+      await refreshReport();
+      setLanded(new Set<string>());
+      if (!previewFresh(gen, qiGen)) return endOp();
+      void load();
+      endOp();
+      focusList();
+    } catch (err) {
+      toastFailure(`Could not import ${s.id}`, err);
+      endOp();
+      if (!previewFresh(gen, qiGen)) return;
+      setSingle((cur) => (cur && cur.id === s.id ? { ...cur, running: false, failure: errText(err) } : cur));
+      // A collision refusal: re-read the plan so the colliding files show.
+      void loadSinglePlan();
+    }
+  }
+
+  // Palette / Cmd+Enter / Cmd+D: the same plan the buttons and the `i` key open.
+  const importReason = (): string | null => {
+    const e = targetEntry();
+    if (!e) return 'Select an entry first (j / k)';
+    if (isImported(e.id)) return `${e.name} is already imported`;
+    if (!e.committed) return `${e.name} is not in the stack`;
+    return importBusy() ? 'Another operation is running' : null;
+  };
+  // A multi-selection imports as a batch; the cursor row stands in otherwise.
+  const planOpenFor = (id: string): boolean => single()?.id === id && single()?.view.phase !== 'error';
+  const selectionReason = (): string | null => {
+    if (importBusy()) return 'Another operation is running';
+    if (batchConfirm(batch())) return 'The import plan is already open';
+    const p = planBatch(selectionCandidates(), importedIds());
+    return p.ready.length + p.needDest.length ? null : 'Nothing selected can be imported';
+  };
+  const actionName = (): string | null => {
+    const e = targetEntry();
+    return e ? e.name ?? e.id : null;
+  };
+  /** The folder under the cursor when no detail is open: the single-entry actions then mean Import all. */
+  const folderTarget = (): Folder | null => (openEntry() ? null : cursorFolder());
+  const folderReason = (f: Folder): string | null => {
+    if (importBusy()) return 'Another operation is running';
+    if (batchConfirm(batch())) return 'The import plan is already open';
+    return folderImport(f.members, isImported).reason;
+  };
+  useAction('import-selected', {
+    guard: true,
+    title: () => (batchSelected() ? `Import ${selected().size} selected` : folderTarget() ? `Import all ${folderTarget()?.name}` : actionName() ? `Import ${actionName()}` : null),
+    run: () => {
+      if (batchSelected()) return importSelection();
+      const f = folderTarget();
+      if (f) return importFolder(f);
+      const e = targetEntry();
+      if (e) openPlan(e);
+    },
+    reason: () => {
+      if (batchSelected()) return selectionReason();
+      const f = folderTarget();
+      if (f) return folderReason(f);
+      const e = targetEntry();
+      return importReason() ?? (e && planOpenFor(e.id) ? 'The import plan is already open' : null);
+    },
+  });
+  useAction('dry-run', {
+    guard: true,
+    title: () => (batchSelected() ? `Preview plan for ${selected().size} selected` : folderTarget() ? `Preview plan for all ${folderTarget()?.name}` : actionName() ? `Preview plan for ${actionName()}` : null),
+    run: () => {
+      // A selection of 2+ plans the selection; the same button the selection bar shows.
+      if (batchSelected()) return importSelection();
+      const f = folderTarget();
+      if (f) return importFolder(f);
+      const e = targetEntry();
+      if (e) openPlan(e);
+    },
+    reason: () => {
+      if (batchSelected()) return selectionReason();
+      const f = folderTarget();
+      if (f) return folderReason(f);
+      const e = targetEntry();
+      return importReason() ?? (e && planOpenFor(e.id) ? 'The import plan is already open' : null);
+    },
+  });
+  useAction('browse-clear-filters', {
+    run: () => clearFilters(),
+    reason: () => (filtering() ? null : 'No filters are on'),
+  });
 
   // ------------------------------------------------------------------ selection
 
   /** Selection edits are ignored while a batch confirms or runs (its plan is a snapshot). */
   const canSelect = (): boolean => !batchBusyState(batch());
 
-  /** A selection change over a finished summary dismisses it for the action bar. */
   const editSelection = (next: Set<string>): void => {
     if (!canSelect()) return;
     if (batchDone(batch())) setBatch(null);
     setSelected(next);
   };
-
-  const toggleRow = (id: string): void => {
-    if (!canSelect()) return;
-    anchor = id;
-    editSelection(toggleSelected(selected(), id));
+  /** Row keys in list order, and the ids a row stands for (uncommitted entries stand for none: they cannot be imported). */
+  const rowMap = createMemo(() => new Map(rows().map((r) => [r.key, r])));
+  const idsOfKey = (key: string): string[] => {
+    const r = rowMap().get(key);
+    return r ? rowIds(r) : [];
   };
-
-  const extendTo = (id: string, additive: boolean): void => {
+  const curKey = (): string | null => cursorRow()?.key ?? null;
+  /** Apply a click or a key to the selection: plain replaces, Ctrl toggles, Shift ranges from the anchor, both add a range. */
+  const selectRow = (key: string, mods: { shift: boolean; ctrl: boolean }, cursor: string | null = curKey()): void => {
     if (!canSelect()) return;
-    const order = orderedEntries().map((e) => e.id);
-    if (!order.includes(id)) return;
-    anchor ??= id;
-    editSelection(applyRange(selected(), rangeIds(order, anchor, id), additive));
+    const next = selectClick({ selected: selected(), anchor }, rows().map((r) => r.key), cursor, key, mods, idsOfKey);
+    anchor = next.anchor;
+    editSelection(next.selected);
   };
-
+  /** `a` and Ctrl/Cmd+A: every listed row not imported yet (the plan skips not-committed ones with a count). */
   const selectAllNotImported = (): void => {
     if (!canSelect()) return;
     anchor = null;
-    editSelection(new Set<string>(notImportedIds(orderedEntries(), importedIds())));
+    editSelection(new Set<string>(notImportedIds(visible(), importedIds())));
   };
-
   const clearSelection = (): void => {
     if (!canSelect()) return;
     anchor = null;
     editSelection(new Set<string>());
   };
+  /** Two or more picked rows are a batch; one is just a highlighted row with its own Import. */
+  const batchSelected = (): boolean => selected().size > 1;
 
-  /** Click on a row link: modifiers select instead of navigating. */
-  const onRowClick = (e: JsonEntry, ev: MouseEvent): void => {
-    if (ev.shiftKey) {
-      ev.preventDefault();
-      extendTo(e.id, ev.ctrlKey || ev.metaKey);
-    } else if (ev.ctrlKey || ev.metaKey) {
-      ev.preventDefault();
-      toggleRow(e.id);
-    }
+  /** A click on a row: plain selects only it, Ctrl/Cmd toggles, Shift ranges from the anchor, Ctrl+Shift adds the range. The row's own buttons stop the click before here. */
+  const pickRow = (key: string, ev: MouseEvent): void => {
+    if (ev.shiftKey) ev.preventDefault();
+    selectRow(key, { shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey });
+    setCurId(key);
+    focusList();
   };
+  const onRowPick = (e: JsonEntry, ev: MouseEvent): void => pickRow(e.id, ev);
+  const onFolderPick = (f: Folder, ev: MouseEvent): void => pickRow(folderKey(f.name), ev);
+  const selectionText = (): string => selectionLabel(selected().size, folderMode() ? foldersTouched(folderRows(), selected()) : 0);
 
-  /** Gutter press: toggle (or range with Shift) and start a drag-select. */
-  const onGutterDown = (e: JsonEntry, ev: MouseEvent): void => {
-    if (ev.button !== 0 || !canSelect()) return;
-    ev.preventDefault();
-    if (ev.shiftKey) extendTo(e.id, ev.ctrlKey || ev.metaKey);
-    else toggleRow(e.id);
-    dragX = ev.clientX;
-    dragY = ev.clientY;
-    dragging = true;
+  // ------------------------------------------------------------------ folders
+
+  /** Drill into a library folder: a route change, so Back, Forward and reload work. */
+  const openFolder = (f: Folder): void => {
+    setCurId(folderKey(f.name));
+    location.hash = kindHref('component', f.name);
   };
-
-  /**
-   * Gutter hover mid-drag: the selection follows the dragged range, but
-   * only once the pointer travelled past the press point. The selection
-   * bar appearing shifts rows under a stationary cursor, whose synthetic
-   * enter must not extend: a single click selects exactly one row.
-   */
-  const onGutterOver = (e: JsonEntry, ev: MouseEvent): void => {
-    if (dragging && dragPassed(dragX, dragY, ev.clientX, ev.clientY)) extendTo(e.id, false);
+  /** Leave the open folder for the components list, with the cursor back on it. */
+  const upOne = (): void => {
+    const up = upRoute(route());
+    if (up?.kind !== 'kind') return;
+    location.hash = kindHref(up.kindSingular);
+    focusList();
+  };
+  /** Import all: the folder expands to its members, which run through the batch import. */
+  const importFolder = (f: Folder): void => startBatch(`${f.name} library`, expandFolder(f));
+  const importOpenFolder = (): void => {
+    const lib = library();
+    if (lib) importFolder({ name: lib, members: visible(), extends: null, isDefault: false });
   };
 
   // ------------------------------------------------------------------ batch import
 
-  /** Targets for a confirm: ready entries plus needs-dest ones under the base (skipped when empty). */
-  const confirmTargets = (plan: BatchPlan, base: string): BatchTarget[] => [
-    ...plan.ready.map((e) => ({ id: e.id, dest: '' })),
-    ...(base.trim() ? plan.needDest.map((e) => ({ id: e.id, dest: batchDest(base, e.name) })) : []),
-  ];
-
+  const confirmTargets = (plan: BatchPlan, base: string, dests: ReadonlyMap<string, string> = new Map()): BatchTarget[] =>
+    [
+      ...plan.ready.map((e) => ({ id: e.id, dest: '' })),
+      ...(base.trim() ? plan.needDest.map((e) => ({ id: e.id, dest: batchDest(base, e.name) })) : []),
+    ].map((t) => ({ id: t.id, dest: dests.get(t.id)?.trim() || t.dest }));
   const confirmSkipped = (plan: BatchPlan, base: string): number =>
     plan.already.length + plan.unimportable.length + (base.trim() ? 0 : plan.needDest.length);
 
   /**
-   * Open a batch over candidates: one candidate behaves like its row import
-   * (the ask field included); several targets get the dry-run confirm line;
-   * nothing importable lands straight on the summary.
+   * Open a batch over candidates: one candidate behaves like its single
+   * import (the plan with a destination field); several get the combined
+   * file plan; nothing importable lands straight on the summary.
    */
   function startBatch(label: string, candidates: JsonEntry[]): void {
-    if (qi()?.phase === 'working' || batchBusyState(batch()) || opsBusy()) return;
+    if (importBusy()) return;
     const c = config();
     if (!c?.project || !candidates.length) return;
-    clearQiTimer();
-    setQi(null);
-    setQiAsk(null);
+    clearPlanTimer();
+    setSingle(null);
     const plan = planBatch(candidates, importedIds());
     if (candidates.length === 1) {
       const only = candidates[0];
       if (plan.ready.length === 1 || plan.needDest.length === 1) {
-        void quickImport(only);
+        openPlan(only);
         return;
       }
       setBatch({
         phase: 'done',
         label,
-        counts: {
-          imported: 0,
-          already: plan.already.length,
-          refused: 0,
-          skipped: plan.unimportable.length,
-          stopped: false,
-        },
+        counts: { imported: 0, already: plan.already.length, refused: 0, skipped: plan.unimportable.length, stopped: false },
         refusals: [],
         expanded: false,
       });
@@ -559,65 +661,93 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     // Component batches start with the source-tree convention as the shared
     // base, so one confirm imports them; anything else asks for a base.
-    const base = plan.needDest.length && plan.needDest.every((e) => e.kind === 'component') ? 'src/components' : '';
+    const base = batchBase(plan);
     const targets = confirmTargets(plan, base);
-    if (targets.length < 2) {
-      if (!targets.length) {
-        setBatch({
-          phase: 'done',
-          label,
-          counts: { imported: 0, already: plan.already.length, refused: 0, skipped: confirmSkipped(plan, base), stopped: false },
-          refusals: [],
-          expanded: false,
-        });
-        return;
-      }
-      setBatch({ phase: 'confirm', label, plan, base, targets, dry: new Map(), checking: false, expanded: false });
-      void runBatch();
+    if (!targets.length) {
+      setBatch({
+        phase: 'done',
+        label,
+        counts: { imported: 0, already: plan.already.length, refused: 0, skipped: confirmSkipped(plan, base), stopped: false },
+        refusals: [],
+        expanded: false,
+      });
       return;
     }
-    setBatch({ phase: 'confirm', label, plan, base, targets, dry: new Map(), checking: true, expanded: false });
-    void dryRunAll(plan, base, ++dryGen, qiGen);
+    const dests = new Map<string, string>();
+    setBatch({ phase: 'confirm', label, plan, base, targets, per: new Map(), errs: new Map(), dests, skip: new Set<string>(), view: { phase: 'loading' } });
+    void loadBatchPlan(plan, base, ++planGen, qiGen, dests);
   }
 
-  /** Dry-run every target in turn; the confirm line shows the collisions. Writes nothing. */
-  async function dryRunAll(plan: BatchPlan, base: string, gen: number, qgen: number): Promise<void> {
+  /** One dry run per target (a few at a time), merged into the file plan. Writes nothing. */
+  async function loadBatchPlan(plan: BatchPlan, base: string, gen: number, qgen: number, dests: Map<string, string>): Promise<void> {
     const c = config();
-    const targets = confirmTargets(plan, base);
-    const dry = new Map<string, DryOutcome>();
-    for (const t of targets) {
+    if (!c?.project) return;
+    const ctx = { project: c.project, stackPath: c.stackPath };
+    const targets = confirmTargets(plan, base, dests);
+    const per = new Map<string, Plan>();
+    const errs = new Map<string, string>();
+    await mapPooled(targets, 4, async (t) => {
       try {
-        const out = await stackRun('import', importDryRunArgs(t.id, t.dest), c?.project ?? '.', c?.stackPath);
-        if (gen !== dryGen || !previewFresh(qgen, qiGen)) return;
-        dry.set(t.id, { conflicts: fromStackOut<ImportDryRunJson>(out).conflicts ?? [] });
+        per.set(t.id, await planImport(ctx, t.id, t.dest));
       } catch (err) {
-        if (gen !== dryGen || !previewFresh(qgen, qiGen)) return;
-        dry.set(t.id, { error: errText(err) });
+        errs.set(t.id, oneSentence(humanizeCliError(errText(err), { subject: t.id })));
       }
-    }
-    if (gen !== dryGen || !previewFresh(qgen, qiGen)) return;
+    });
+    if (gen !== planGen || !previewFresh(qgen, qiGen)) return;
     const b = batchConfirm(batch());
-    if (b && b.plan === plan && b.base === base) setBatch({ ...b, dry, checking: false });
+    if (!b || b.plan !== plan || b.base !== base || b.dests !== dests) return;
+    const merged = mergePlans(targets.map((t) => per.get(t.id)).filter((p): p is Plan => !!p));
+    // Colliding entries start skipped (their box checked); one a new folder frees is unskipped.
+    const skip = new Set(b.skip);
+    for (const t of targets) {
+      const p = per.get(t.id);
+      if (p && collidingTargets(p).length) skip.add(t.id);
+      else if (dests.has(t.id)) skip.delete(t.id);
+    }
+    setBatch({ ...b, targets, per, errs, skip, view: { phase: 'ready', plan: merged } });
   }
 
   /** A base edit re-plans the targets and re-runs the dry runs (debounced). */
   const onBatchBase = (value: string): void => {
     const b = batchConfirm(batch());
     if (!b) return;
-    const targets = confirmTargets(b.plan, value);
-    setBatch({ ...b, base: value, targets, dry: new Map(), checking: true });
-    clearDryTimer();
-    const gen = ++dryGen;
+    const targets = confirmTargets(b.plan, value, b.dests);
+    setBatch({ ...b, base: value, targets, per: new Map(), errs: new Map(), view: { phase: 'loading' } });
+    clearPlanTimer();
+    const gen = ++planGen;
     const qgen = qiGen;
     const plan = b.plan;
-    dryTimer = setTimeout(() => void dryRunAll(plan, value, gen, qgen), 400);
+    const dests = b.dests;
+    planTimer = setTimeout(() => void loadBatchPlan(plan, value, gen, qgen, dests), 400);
+  };
+
+  /** A folder typed for one colliding entry: only that plan is re-checked (debounced); the list stays up so the field keeps focus. */
+  const onBatchEntryDest = (id: string, value: string): void => {
+    const b = batchConfirm(batch());
+    if (!b) return;
+    const dests = new Map(b.dests).set(id, value);
+    setBatch({ ...b, dests, targets: confirmTargets(b.plan, b.base, dests) });
+    clearPlanTimer();
+    const gen = ++planGen;
+    const qgen = qiGen;
+    const plan = b.plan;
+    const base = b.base;
+    planTimer = setTimeout(() => void loadBatchPlan(plan, base, gen, qgen, dests), 400);
+  };
+  const onBatchSkip = (id: string, skip: boolean): void => {
+    const b = batchConfirm(batch());
+    if (!b) return;
+    const next = new Set(b.skip);
+    if (skip) next.add(id);
+    else next.delete(id);
+    setBatch({ ...b, skip: next });
   };
 
   const cancelBatch = (): void => {
     const b = batch();
     if (b?.phase === 'confirm') {
-      clearDryTimer();
-      dryGen++;
+      clearPlanTimer();
+      planGen++;
       setBatch(null);
       focusList();
     } else if (b?.phase === 'running') {
@@ -625,38 +755,50 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   };
 
-  /** Entries needing no destination import blindly; the base covers the rest. Never atomic. */
+  /** Entries without collisions import in turn; the rest are skipped up front. Never atomic. */
   async function runBatch(): Promise<void> {
     const b = batchConfirm(batch());
     const c = config();
-    if (!b || b.checking || !c?.project || qi()?.phase === 'working' || opsBusy()) return;
-    clearDryTimer();
-    dryGen++;
+    if (!b || b.view.phase !== 'ready' || !c?.project || single()?.running || opsBusy()) return;
+    const targets = runnableTargets(b);
+    if (!targets.length) return;
+    clearPlanTimer();
+    planGen++;
     const gen = qiGen;
     beginOp();
     const counts: BatchCounts = {
       imported: 0,
       already: b.plan.already.length,
       refused: 0,
-      skipped: confirmSkipped(b.plan, b.base) - b.plan.already.length,
+      skipped: confirmSkipped(b.plan, b.base) - b.plan.already.length + (b.targets.length - targets.length),
       stopped: false,
     };
     const refusals: BatchRefusal[] = [];
+    const landedIds: string[] = [];
+    const batchCtx = { project: c.project, stackPath: c.stackPath };
+    /** One toast for the whole run, with an Undo that removes what landed. */
+    const toastBatch = (): void => {
+      if (landedIds.length || counts.refused || counts.stopped) {
+        toastOutcome(batchOutcome({ imported: landedIds, already: counts.already, refused: counts.refused, stopped: counts.stopped }), batchCtx);
+      }
+      if (landedIds.length) {
+        recordImported(c.project, landedIds);
+        setImportedAt(readImportedAt(c.project));
+      }
+    };
     // Imports attempted so far: a route change or unmount mid-run still
     // lands the lock/report refresh, so the project page shows the imports.
     let attempted = 0;
-    /** A stale early return still refreshes once anything was attempted. */
     const refreshAfterStale = async (): Promise<void> => {
-      // Every stale exit below funnels through here, so the op ends here too.
       endOp();
       if (!attempted) return;
+      toastBatch();
       await refreshLock();
       await refreshReport();
     };
-    setBatchRes(new Map());
-    setBatch({ phase: 'running', label: b.label, targets: b.targets, at: 0, counts, cancel: false });
-    for (let i = 0; i < b.targets.length; i++) {
-      const t = b.targets[i];
+    setBatch({ phase: 'running', label: b.label, targets, at: 0, counts, cancel: false });
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
       const cur = batchRunning(batch());
       if (!cur) {
         await refreshAfterStale();
@@ -667,7 +809,6 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
         break;
       }
       setBatch({ ...cur, at: i });
-      setBatchRes((prev) => new Map(prev).set(t.id, { phase: 'working' }));
       attempted++;
       try {
         const out = await stackRun('import', importArgs(t.id, t.dest), c.project, c.stackPath);
@@ -676,7 +817,8 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           return;
         }
         const r = fromStackOut<ImportJson>(out);
-        const e = index().byId.get(t.id);
+        // Dependencies pulled in with a member land too (and are undone with it).
+        for (const p of r.imported) if (!landedIds.includes(p.id)) landedIds.push(p.id);
         if (r.imported.some((p) => p.id === t.id)) {
           counts.imported++;
           setLanded((prev) => new Set<string>(prev).add(t.id));
@@ -684,22 +826,15 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
           counts.already++;
         } else {
           counts.imported++;
-          if (e) setLanded((prev) => new Set<string>(prev).add(t.id));
+          if (entryOf(t.id)) setLanded((prev) => new Set<string>(prev).add(t.id));
         }
-        const line = quickImportLine(r, t.id);
-        const sections = describeImport(r);
-        setBatchRes((prev) => new Map(prev).set(t.id, { phase: 'done', line, sections, expanded: false }));
       } catch (err) {
         if (!previewFresh(gen, qiGen)) {
           await refreshAfterStale();
           return;
         }
-        const text = errText(err);
         counts.refused++;
-        refusals.push({ id: t.id, line: quickImportError(text), err: text, lookalikes: refusalFiles(text) });
-        setBatchRes((prev) =>
-          new Map(prev).set(t.id, { phase: 'error', line: quickImportError(text), err: text, lookalikes: refusalFiles(text), expanded: false }),
-        );
+        refusals.push({ id: t.id, line: oneSentence(humanizeCliError(errText(err), { subject: t.id })), err: errText(err) });
       }
     }
     if (!previewFresh(gen, qiGen)) {
@@ -707,7 +842,6 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       return;
     }
     await refreshLock();
-    // The lock is authoritative again: landed rows flip through it from here.
     if (!previewFresh(gen, qiGen)) {
       endOp();
       await refreshReport();
@@ -715,8 +849,6 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     setLanded(new Set<string>());
     await refreshReport();
-    // A route or project change during the final refresh must not land the
-    // summary on the new route; the op still ends so the lock releases.
     if (!previewFresh(gen, qiGen)) {
       endOp();
       return;
@@ -725,28 +857,22 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     setSelected(new Set<string>());
     anchor = null;
     endOp();
+    toastBatch();
+    // The plan is cleared; the summary replaces it.
     setBatch({ phase: 'done', label: b.label, counts, refusals, expanded: false });
+    focusList();
   }
-
-  const toggleBatchRow = (id: string): void => {
-    setBatchRes((prev) => {
-      const cur = prev.get(id);
-      if (!cur || cur.phase === 'working') return prev;
-      return new Map(prev).set(id, { ...cur, expanded: !cur.expanded });
-    });
-  };
 
   /** Selection imports run in list order; stray ids follow in catalog order. */
   const selectionCandidates = (): JsonEntry[] => {
     const ids = selected();
     if (!ids.size) return [];
-    const pos = new Map(orderedEntries().map((e, i) => [e.id, i]));
+    const pos = new Map(visible().map((e, i) => [e.id, i]));
     return [...ids]
       .map((id) => index().byId.get(id))
       .filter((e): e is JsonEntry => !!e)
       .sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9) || a.id.localeCompare(b.id));
   };
-
   const importSelection = (): void => {
     const cands = selectionCandidates();
     if (!cands.length) {
@@ -756,33 +882,28 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     startBatch(`${cands.length} selected`, cands);
   };
 
-  const up = (): void => {
-    const r = route();
-    if (r.kind === 'entry') location.hash = r.file ? entryHref(r.id) : kindHref(kindOf(r.id));
-    else if (r.kind === 'kind' || r.kind === 'all' || r.kind === 'missing') location.hash = kindHref('');
-  };
+  /** Shared base a multi-entry batch starts with (component batches use the source-tree convention). */
+  const batchBase = (plan: BatchPlan): string =>
+    plan.needDest.length && plan.needDest.every((e) => e.kind === 'component') ? 'src/components' : '';
+  /** The plural kind word the list is scoped to (`skills`, `presets`), or null for everything. */
+  const scopeWord = (): string | null => (presetsMode() ? 'presets' : kind() ? pluralOf(kind() as string) : null);
+
+  // ------------------------------------------------------------------ search, filters
 
   const clearQuery = (): void => {
     setQ('');
     if (inputEl) inputEl.value = '';
   };
-
-  /** After the bar closes (dismiss/cancel), focus returns to the list: the cursor row, else the prompt. */
-  const focusList = (): void => {
-    const i = sel();
-    const row = i >= 0 ? (document.querySelector(`[data-row="${i}"]`) as HTMLElement | null) : null;
-    if (row) row.focus();
-    else if (matchMedia('(hover: hover)').matches) inputEl?.focus();
+  const clearFilters = (): void => {
+    clearQuery();
+    setChips(new Set<ChipKey>());
   };
 
   /**
    * Stale-while-revalidate: a cached catalog renders at once and refreshes in
-   * the background; `loading…` shows only when this source has no cache yet.
-   * Returns the outcome for the refresh button (null when a newer load
-   * superseded this one); `silent` skips the full-view error, and
-   * `keepStale` leaves the current list on screen while the reload runs,
-   * so a failed refresh keeps the stale list and shows its own error line
-   * instead.
+   * the background; the loading skeleton shows only when this source has no
+   * cache yet. Returns the outcome for the refresh button (null when a newer
+   * load superseded this one).
    */
   async function load(
     opts?: { silent?: boolean; keepStale?: boolean },
@@ -793,11 +914,9 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     const cached = catalogs.get(key);
     if (cached) {
       setEntries(cached.entries);
-      setUncommitted(cached.uncommitted);
       setLoaded(true);
     } else if (!opts?.keepStale) {
       setEntries([]);
-      setUncommitted(new Set<string>());
       setLoaded(false);
       setNote(null);
     }
@@ -816,7 +935,6 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
       };
       catalogs.set(key, next);
       setEntries(next.entries);
-      setUncommitted(next.uncommitted);
       setNote(null);
       return { ok: true, count: next.entries.length };
     } catch (err) {
@@ -829,22 +947,14 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
   }
 
-  /**
-   * Re-read the catalog from the checkout from scratch: drop the cached
-   * list and every cached preview, then re-run the same online
-   * `list --json` the first load uses (stale remote libraries re-sync on
-   * the way — see stackArgs.ts — so no separate remote step; a `remote
-   * sync` would only matter for remote skills, which list never fetches).
-   * The imported markers reload too. The route and scroll position stay
-   * put, and the stack path is re-read from the config only, never
-   * re-validated (that would cost extra spawns for no new information).
-   */
+  /** Re-read the catalog from the checkout from scratch: cached list, previews and file lists dropped. */
   async function refresh(): Promise<void> {
     if (rs()?.phase === 'working' || importBusy()) return;
     clearRsTimer();
     setRs({ phase: 'working' });
     clearCatalogs(sourceKey(config()));
     clearPreviews();
+    clearListings();
     const r = await load({ silent: true, keepStale: true });
     if (!r) {
       setRs(null);
@@ -852,140 +962,192 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     }
     if (r.ok) {
       await refreshLock();
-      setRs({ phase: 'done', line: refreshLine(r.count) });
-      armRsTimer(8000);
+      const line = refreshLine(r.count);
+      setRs({ phase: 'done', line });
+      // The bar stays put: the result goes to the live region and a quiet toast.
+      pushToast({ tone: 'success', title: 'Catalog refreshed', description: `${r.count} ${r.count === 1 ? 'entry' : 'entries'}`, ttl: 3000 });
+      rsTimer = setTimeout(() => setRs(null), 8000);
     } else {
+      // Stays until the next refresh: the Retry button lives with it.
       setRs({ phase: 'error', err: r.err });
-      armRsTimer(15000);
     }
   }
 
-  onMount(() => {
-    if (matchMedia('(hover: hover)').matches) inputEl?.focus();
+  // ------------------------------------------------------------------ keys
 
+  /** A folder is open with nothing in front of it: Esc, Backspace and Alt+Left go up a level. */
+  const canGoUp = (): boolean => !!upRoute(route()) && !single() && !batchBusyState(batch());
+  /** Esc, innermost first: an open plan, a summary, the open detail, a query, then the open folder. A selection is cleared before the detail, query and folder. */
+  const escape = (inPreview: boolean): void => {
+    const b = batch();
+    if (single() && !single()!.running) return cancelSingle();
+    if (b?.phase === 'confirm' || b?.phase === 'running') return cancelBatch();
+    if (b?.phase === 'done') {
+      setBatch(null);
+      return focusList();
+    }
+    if (selected().size) return clearSelection();
+    if (openEntry()) return closeDetail();
+    if (q()) return clearQuery();
+    if (canGoUp()) return upOne();
+    if (inPreview) return focusList();
+  };
+
+  onMount(() => {
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
-      // The search box is ours; other fields (the --to input) keep their keys.
+      // The search box is ours; other fields (the destination input, the sort select) keep their keys.
       if (t && t !== inputEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
+      // Inside the search box only the cursor keys act; every letter, space
+      // included, is text (never i / a / r / j / k hotkeys).
+      if (t === inputEl && !['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(ev.key)) return;
       // Buttons and links keep Enter and Space for their own activation.
-      if (t && ['BUTTON', 'A'].includes(t.tagName) && (ev.key === 'Enter' || ev.key === ' ')) return;
-      // Shift+arrows extend the selection from the anchor over entry rows;
-      // Ctrl/Cmd makes the extend additive, like Ctrl-click. This runs
-      // before the modifier early return so Ctrl+Shift+arrows reaches it.
-      if (ev.shiftKey && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+      if (t && ['BUTTON', 'A', 'SUMMARY'].includes(t.tagName) && (ev.key === 'Enter' || ev.key === ' ')) return;
+      // Keys typed inside the diff or the plan belong to them.
+      if (t?.closest('.plan, .review')) return;
+      // Shift+arrows / Home / End extend the selection from the anchor; with Ctrl/Cmd the range is added to it.
+      if (ev.shiftKey && !ev.altKey && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key) && t !== inputEl) {
         ev.preventDefault();
-        if (!canSelect()) return;
-        const order = orderedEntries().map((e) => e.id);
-        if (!order.length) {
-          setSel((s) => moveSel(s, ev.key === 'ArrowDown' ? 1 : -1, navRows().length));
-          return;
-        }
-        const from = order[sel()] ?? null;
-        if (from) anchor ??= from;
-        setSel((s) => moveSel(s, ev.key === 'ArrowDown' ? 1 : -1, navRows().length));
-        const to = order[sel()] ?? null;
-        if (to) {
-          anchor ??= to;
-          editSelection(applyRange(selected(), rangeIds(order, anchor, to), ev.ctrlKey || ev.metaKey));
-        }
+        const how = ev.ctrlKey || ev.metaKey ? 'add' : 'extend';
+        if (ev.key === 'Home') moveTo(rows().length ? 0 : -1, how);
+        else if (ev.key === 'End') moveTo(rows().length - 1, how);
+        else move(ev.key === 'ArrowDown' ? 1 : -1, how);
+        return;
+      }
+      // Ctrl/Cmd+Arrow moves the cursor and leaves the selection alone.
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && t !== inputEl) {
+        ev.preventDefault();
+        move(ev.key === 'ArrowDown' ? 1 : -1, 'keep');
+        return;
+      }
+      // Ctrl/Cmd+A selects like `a` (the field keeps its own select-all).
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && ev.key.toLowerCase() === 'a' && t !== inputEl && visible().length) {
+        ev.preventDefault();
+        selectAllNotImported();
+        return;
+      }
+      // Alt+Left goes up one folder, like Back in a file explorer.
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && ev.key === 'ArrowLeft' && t !== inputEl && canGoUp()) {
+        ev.preventDefault();
+        upOne();
         return;
       }
       if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return;
       switch (ev.key) {
+        case 'Backspace':
+          if (t !== inputEl && canGoUp()) {
+            ev.preventDefault();
+            upOne();
+          }
+          return;
         case 'ArrowDown':
           ev.preventDefault();
-          setSel((s) => moveSel(s, 1, navRows().length));
+          move(1);
           return;
         case 'ArrowUp':
           ev.preventDefault();
-          setSel((s) => moveSel(s, -1, navRows().length));
+          move(-1);
+          return;
+        case 'Home':
+        case 'End':
+          if (t === inputEl) return;
+          ev.preventDefault();
+          moveTo(ev.key === 'Home' ? (rows().length ? 0 : -1) : rows().length - 1, 'follow');
           return;
         case 'Enter': {
-          const list = navRows();
-          const pick = sel() >= 0 ? list[sel()] : q().trim() ? list[0] : undefined;
-          if (pick) {
+          // Enter opens the cursor row (a folder, or an entry's detail).
+          const e = cursorEntry();
+          const f = cursorFolder();
+          if (e || f) {
             ev.preventDefault();
-            location.hash = pick.href;
+            if (t === inputEl) inputEl?.blur();
+            if (f) openFolder(f);
+            else if (e) openDetail(e);
           }
           return;
         }
-        case 'Escape': {
+        case 'Escape':
           ev.preventDefault();
-          const b = batch();
-          if (b?.phase === 'confirm' || b?.phase === 'running') cancelBatch();
-          else if (b?.phase === 'done') {
-            setBatch(null);
-            focusList();
+          // Esc in the search box clears a typed query (focus stays); in an empty box it leaves the box.
+          if (t === inputEl) {
+            if (searchEscape(inputEl?.value ?? '') === 'clear') clearQuery();
+            else {
+              inputEl?.blur();
+              focusList();
+            }
+            return;
           }
-          else if (selected().size) clearSelection();
-          else if (q()) clearQuery();
-          else up();
+          escape(!!t?.closest('#entry-preview'));
+          return;
+      }
+      // `j` / `k` walk the list like the arrows.
+      if (ev.key === 'j' || ev.key === 'k') {
+        ev.preventDefault();
+        move(ev.key === 'j' ? 1 : -1);
+        return;
+      }
+      // `o` opens the cursor row's detail.
+      if (ev.key === 'o') {
+        const e = cursorEntry();
+        const f = cursorFolder();
+        if (f) {
+          ev.preventDefault();
+          openFolder(f);
           return;
         }
-      }
-      // `i` imports the cursor row in place. Text fields keep it (the
-      // early return above, plus the search box here); with no cursor row it
-      // falls through and lands in the search like any other letter.
-      if (ev.key === 'i' && t !== inputEl) {
-        const e = selEntry();
         if (e) {
           ev.preventDefault();
-          void quickImport(e);
+          openDetail(e);
           return;
         }
       }
-      // `a` selects every not-imported row in the list whenever one is
-      // showing, no cursor needed. Text fields keep the key (the early
-      // return above) and the search box keeps it here, so typing `a`
-      // still works everywhere it should.
-      if (ev.key === 'a' && t !== inputEl) {
-        if (orderedEntries().length) {
+      // `i` imports the selection when 2+ rows are picked, else the open entry or the cursor row.
+      if (ev.key === 'i') {
+        if (batchSelected()) {
+          ev.preventDefault();
+          if (!selectionReason()) importSelection();
+          return;
+        }
+        const f = folderTarget();
+        if (f) {
+          ev.preventDefault();
+          if (!folderReason(f)) importFolder(f);
+          return;
+        }
+        const e = targetEntry();
+        if (e) {
+          ev.preventDefault();
+          openPlan(e);
+          return;
+        }
+      }
+      // `a` selects every not-imported row of the list in view.
+      if (ev.key === 'a') {
+        if (visible().length) {
           ev.preventDefault();
           selectAllNotImported();
           return;
         }
       }
-      // `r` re-reads the catalog from the checkout. Like `i`, text fields
-      // keep it; unlike `i` it needs no cursor row.
-      if (ev.key === 'r' && t !== inputEl) {
+      // `r` re-reads the catalog from the checkout; no cursor row needed.
+      if (ev.key === 'r') {
         ev.preventDefault();
         void refresh();
         return;
       }
-      // Space toggles the cursor row; with no cursor row it keeps scrolling.
+      // Space toggles the cursor row in the selection; with no row it scrolls the page.
       if (ev.key === ' ') {
-        const e = t !== inputEl ? selEntry() : null;
-        if (e) {
-          ev.preventDefault();
-          toggleRow(e.id);
-          return;
-        }
-        if (!q()) {
-          ev.preventDefault();
-          scrollByPage(window.innerHeight * 0.8);
-          return;
-        }
+        ev.preventDefault();
+        const key = curKey();
+        if (key) selectRow(key, { shift: false, ctrl: true });
+        else scrollByPage((document.querySelector('.sa-shell__sheet')?.clientHeight ?? window.innerHeight) * 0.8);
       }
-      if (ev.key.length === 1 && t !== inputEl) inputEl?.focus();
     };
     window.addEventListener('keydown', onKey);
     onCleanup(() => window.removeEventListener('keydown', onKey));
-    // A gutter drag-select ends on release anywhere (even outside the
-    // window), on blur, or on pointer cancel — never stuck selecting.
-    const onUp = () => {
-      dragging = false;
-    };
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    window.addEventListener('blur', onUp);
-    onCleanup(() => {
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onUp);
-    });
   });
+
+  // ------------------------------------------------------------------ effects
 
   // Catalog loads for this source; a project or stack switch reloads, nothing else does.
   createEffect(() => {
@@ -993,43 +1155,55 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     untrack(() => void load());
   });
 
-  /** Selection, batch and row results belong to the route and project they ran against. */
-  const clearBatchState = (): void => {
+  let leftFolder: string | null = null;
+  /** Selection, plans and results belong to the route and project they ran against. */
+  const clearOpState = (keepSelection = false): void => {
     qiGen++;
-    dryGen++;
-    dragging = false;
-    anchor = null;
-    clearQiTimer();
-    clearDryTimer();
-    setQi(null);
-    setQiAsk(null);
-    setSelected(new Set<string>());
+    planGen++;
+    clearPlanTimer();
+    setSingle(null);
+    if (!keepSelection) {
+      anchor = null;
+      setSelected(new Set<string>());
+    }
     setBatch(null);
-    setBatchRes(new Map());
     setLanded(new Set<string>());
   };
 
-  // A new route clears the prompt, the cursor and any inline import, like the web hashchange.
+  // A route to another kind or entry clears the query and any plan. A route that only
+  // opens a file of the same entry keeps everything. The list follows what the route names.
   createEffect(
     on(
-      () => props.segs.join('/'),
-      () => {
-        untrack(clearQuery);
-        setSel(-1);
-        untrack(clearBatchState);
-        scrollToTop();
+      [routeKey, loaded],
+      ([, isLoaded], prev) => {
+        if (!isLoaded) return;
+        untrack(() => {
+          const rsel = routeSel();
+          // The query survives a kind switch (it just scopes to the new kind).
+          if (prev && prev[0] !== routeKey()) {
+            // The cursor-following detail changes the route per row; only a new scope drops the selection (below).
+            clearOpState(true);
+            if (narrow()) scrollToTop();
+          }
+          if (rsel.entryId) {
+            if (indexOfEntry(visible(), rsel.entryId) < 0) clearFilters();
+            setCurId(rsel.entryId);
+          }
+          // Back up from a folder: the cursor lands on the folder just left.
+          if (leftFolder && !rsel.library && !rsel.entryId && rsel.kind === 'component') setCurId(folderKey(leftFolder));
+          leftFolder = rsel.library ?? (rsel.entryId ? leftFolder : null);
+          if (!prev || prev[0] !== routeKey()) queueMicrotask(() => listEl?.focus({ preventScroll: true }));
+        });
       },
-      { defer: true },
     ),
   );
 
-  // A project switch clears the inline import state, like Project.tsx: the
-  // result and the ask field belong to the project they ran against.
+  // A project switch clears plans and results, like Project.tsx.
   createEffect(
     on(
       () => config()?.project ?? null,
       () => {
-        untrack(clearBatchState);
+        untrack(() => clearOpState());
         clearRsTimer();
         setRs(null);
       },
@@ -1037,1240 +1211,484 @@ export default function Browse(props: { scenario: string; segs: string[] }) {
     ),
   );
 
-  createEffect(on(q, () => setSel(-1), { defer: true }));
-
+  // A new search puts the cursor on the best match, and drops the selection with the old results.
   createEffect(
     on(
-      sel,
-      (i) => {
-        if (i >= 0) {
-          const row = document.querySelector(`[data-row="${i}"]`);
-          if (row) scrollRowIntoView(row);
-        }
+      q,
+      () => {
+        setCurId(null);
+        anchor = null;
+        setSelected(new Set<string>());
       },
       { defer: true },
     ),
   );
+  // Another kind or library is another list: the selection does not travel.
+  createEffect(
+    on(
+      () => `${kind() ?? ''}|${library() ?? ''}`,
+      () => {
+        anchor = null;
+        setSelected(new Set<string>());
+      },
+      { defer: true },
+    ),
+  );
+  // A sort, chip or refresh that hides rows drops them from the selection.
+  createEffect(on(visible, (v) => setSelected((prev) => pruneSelection(prev, v.map((e) => e.id))), { defer: true }));
+  // Leaving Browse drops the selection (the signal dies with the view; the anchor goes with it).
+  onCleanup(() => {
+    anchor = null;
+    setSelected(new Set<string>());
+  });
 
-  return (
-    <>
-      <div id="prompt">
-        <nav id="crumbs" aria-label="path">
-          <For each={crumbs()}>
-            {(c, i) => (
-              <>
-                <Show when={i() > 0}>
-                  <span class="sep">/</span>
-                </Show>
-                <Show when={c.href} fallback={<span>{c.label}</span>}>
-                  {(h) => <a href={h()}>{c.label}</a>}
-                </Show>
-              </>
-            )}
-          </For>
-        </nav>
-        <span class="ps" aria-hidden="true">
-          ›
-        </span>
-        <input
-          id="q"
-          ref={inputEl}
-          type="text"
-          role="searchbox"
-          aria-label="search entries"
-          placeholder="type to search"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck={false}
-          onInput={(e) => setQ(e.currentTarget.value)}
-        />
-        <RefreshButton state={rs()} disabled={importBusy()} onRefresh={() => void refresh()} />
-      </div>
-      <BatchBar
-        batch={batch()}
-        selectedCount={selected().size}
-        onImportSelection={importSelection}
-        onClearSelection={clearSelection}
-        onBase={onBatchBase}
-        onRun={() => void runBatch()}
-        onCancel={cancelBatch}
-        onToggleConfirm={() => setBatch((b) => (b?.phase === 'confirm' ? { ...b, expanded: !b.expanded } : b))}
-        onToggleDone={() => setBatch((b) => (b?.phase === 'done' ? { ...b, expanded: !b.expanded } : b))}
-        onDismiss={() => {
-          setBatch(null);
-          focusList();
-        }}
+  // ------------------------------------------------------------------ view
+
+  const targetBranch = (): string => t3Info()?.worktrees.find((w) => w.isCurrent)?.branch ?? 'project';
+
+  const entryPlanNode = () => {
+    const s = single();
+    const e = s ? entryOf(s.id) : undefined;
+    if (!s || !e) return null;
+    const ent = e;
+    return (
+      <ImportPlan
+        title={LABEL.importPlan}
+        subject={`${e.name} · ${LABEL.importInto(targetBranch())}`}
+        view={s.view}
+        dest={{ value: s.dest, placeholder: ent ? defaultImportDest(ent) : '', required: !!ent && needsImportDest(ent), onInput: onSingleDest }}
+        confirmLabel="Import"
+        busy={s.running}
+        failure={s.failure}
+        onConfirm={() => void confirmSingle()}
+        onCancel={() => cancelSingle()}
       />
-      <Show when={!note()} fallback={<CliErr text={note() as string} />}>
-        <Switch>
-          <Match when={!loaded()}>
-            <Empty>(._.) loading…</Empty>
-          </Match>
-          <Match when={!entries().length}>
-            <Empty>(._.) none</Empty>
-          </Match>
-          <Match when={listed() !== null}>
-            <EntryList
-              byId={byId()}
-              entries={listed() ?? []}
-              uncommitted={uncommitted()}
-              sel={sel()}
-              entryHref={entryHref}
-              qi={qi()}
-              ask={qiAsk()}
-              importedIds={importedIds()}
-              onImport={(e) => void quickImport(e)}
-              onAskInput={(value) => setQiAsk((a) => (a ? { ...a, value } : a))}
-              onAskConfirm={confirmQiAsk}
-              onAskClose={() => setQiAsk(null)}
-              onToggleFull={toggleQiFull}
-              batchRes={batchRes()}
-              landed={landed()}
-              selected={selected()}
-              batchBusy={batchBusyState(batch())}
-              onRowClick={onRowClick}
-              onGutterDown={onGutterDown}
-              onGutterOver={onGutterOver}
-              onBatchToggle={toggleBatchRow}
-              onImportAll={searching() ? null : (label, members) => startBatch(label, members)}
-              batchLabel={(() => {
-                const r = route();
-                return r.kind === 'kind' ? pluralOf(r.kindSingular) : 'all';
-              })()}
-            />
-          </Match>
-          <Match when={route().kind === 'home' && !searching()}>
-            <KindHome agg={agg()} entries={entries()} sel={sel()} kindHref={kindHref} allHref={allHref()} />
-          </Match>
-          <Match when={grouped()}>
-            {(g) => (
-              <ComponentKindView
-                groups={g().groups}
-                ungrouped={g().ungrouped}
-                uncommitted={uncommitted()}
-                sel={sel()}
-                entryHref={entryHref}
-                qi={qi()}
-                ask={qiAsk()}
-                importedIds={importedIds()}
-                onImport={(e) => void quickImport(e)}
-                onAskInput={(value) => setQiAsk((a) => (a ? { ...a, value } : a))}
-                onAskConfirm={confirmQiAsk}
-                onAskClose={() => setQiAsk(null)}
-                onToggleFull={toggleQiFull}
-                batchRes={batchRes()}
-                landed={landed()}
-                selected={selected()}
-                batchBusy={batchBusyState(batch())}
-                onRowClick={onRowClick}
-                onGutterDown={onGutterDown}
-                onGutterOver={onGutterOver}
-                onBatchToggle={toggleBatchRow}
-                onImportAll={(label, members) => startBatch(label, members)}
-              />
-            )}
-          </Match>
-          <Match when={route().kind === 'entry'}>
-            <EntryDetail
-              scenario={props.scenario}
-              id={entryId()}
-              file={entryFile()}
-              source={source()}
-              entries={entries()}
-              index={index()}
-              sel={sel()}
-              entryHref={entryHref}
-              fileHref={fileHref}
-              onFiles={setEntryFiles}
-              onImported={() => void load()}
-            />
-          </Match>
-          <Match when={route().kind === 'missing'}>
-            <Empty>(o_O) not found</Empty>
-          </Match>
-        </Switch>
-      </Show>
-    </>
-  );
-}
+    );
+  };
 
-/** One keyboard-cursor target: `data-row` index plus the selected attribute. */
-function Krow(props: { index: number; sel: number; href: string; zero: boolean; children: JSX.Element }) {
-  const selected = createMemo(() => props.sel === props.index);
-  return (
-    <a
-      class={`krow${props.zero ? ' zero' : ''}`}
-      href={props.href}
-      data-row={props.index}
-      data-nav=""
-      data-sel={selected() ? '' : undefined}
-    >
-      {props.children}
-    </a>
-  );
-}
-
-/** Inline-import plumbing threaded from Browse into every entry row. */
-type QiProps = {
-  qi: QiState | null;
-  ask: { id: string; value: string } | null;
-  importedIds: Set<string>;
-  onImport: (e: JsonEntry) => void;
-  onAskInput: (value: string) => void;
-  onAskConfirm: () => void;
-  onAskClose: () => void;
-  onToggleFull: () => void;
-};
-
-/** Batch plumbing threaded from Browse into every entry row and list header. */
-type BatchListProps = {
-  batchRes: Map<string, BatchRowRes>;
-  landed: Set<string>;
-  selected: Set<string>;
-  batchBusy: boolean;
-  onRowClick: (e: JsonEntry, ev: MouseEvent) => void;
-  onGutterDown: (e: JsonEntry, ev: MouseEvent) => void;
-  onGutterOver: (e: JsonEntry, ev: MouseEvent) => void;
-  onBatchToggle: (id: string) => void;
-  /** Null on search results, which get selection but no import-all. */
-  onImportAll: ((label: string, members: JsonEntry[]) => void) | null;
-};
-
-/** Entries an import-all button would attempt: committed and not imported. */
-const importAllCount = (members: JsonEntry[], imported: Set<string>): number => {
-  const p = planBatch(members, imported);
-  return p.ready.length + p.needDest.length;
-};
-
-/** One finished inline result under a row, shared by row imports and batch rows. */
-type RowRes =
-  | { phase: 'done'; line: string; sections: OpSection[]; expanded: boolean }
-  | { phase: 'error'; line: string; err: string; lookalikes: string[]; expanded: boolean };
-
-function RowResult(props: { res: RowRes; onToggle: () => void }) {
-  return (
-    <div class="qires">
-      <Show
-        when={props.res.phase === 'done'}
-        fallback={
-          <>
-            <span class="conflict">{(props.res as { line: string }).line}</span>
-            <button
-              class="btn"
-              title="show the full error"
-              aria-expanded={props.res.expanded}
-              onClick={() => props.onToggle()}
-            >
-              details
-            </button>
-            <Show when={props.res.expanded}>
-              <Show
-                when={(props.res as { lookalikes: string[] }).lookalikes.length}
-                fallback={<CliErr text={(props.res as { err: string }).err} />}
-              >
-                <p class="conflict" role="alert">
-                  untracked look-alikes, nothing written:
-                </p>
-                <pre class="raw">{(props.res as { lookalikes: string[] }).lookalikes.join('\n')}</pre>
-              </Show>
-            </Show>
-          </>
-        }
+  const batchPlanNode = () => {
+    const b = batchConfirm(batch());
+    if (!b) return null;
+    const uncovered = b.base.trim() ? 0 : b.plan.needDest.length;
+    // `3 selected · +2 required` once the dry runs land; the plan's own entries
+    // never count their dependencies as picks (planCountLabel).
+    // Already-imported picks are skipped silently by the batch; say so, and
+    // let the button read `Import 1 of 2` when the counts differ.
+    return (
+      <ImportPlan
+        title={LABEL.importPlan}
+        subject={LABEL.importInto(targetBranch())}
+        view={b.view}
+        confirmLabel="Import"
+        counted
+        already={b.plan.already}
+        resolve={{ dests: b.dests, skipped: b.skip, editable: (id) => b.targets.some((t) => t.id === id), onDest: onBatchEntryDest, onSkip: onBatchSkip }}
+        busy={false}
+        skipColliding
+        blocked={null}
+        onConfirm={() => void runBatch()}
+        onCancel={cancelBatch}
       >
-        <button
-          class="qiline"
-          title="show the full import log"
-          aria-expanded={props.res.expanded}
-          onClick={() => props.onToggle()}
-        >
-          {props.res.line}
-        </button>
-        <Show when={props.res.expanded}>
-          <OpResult sections={(props.res as { sections: OpSection[] }).sections} />
+        <Show when={b.plan.needDest.length > 0}>
+          <label class="plan__dest">
+            <span class="plan__dest-label">Folder for entries that need one</span>
+            <input
+              type="text"
+              value={b.base}
+              placeholder="src/components"
+              spellcheck={false}
+              autocomplete="off"
+              aria-label="Shared destination folder for entries that need one; each lands in its own folder inside it"
+              onInput={(ev) => onBatchBase(ev.currentTarget.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === 'Enter') {
+                  ev.preventDefault();
+                  void runBatch();
+                }
+              }}
+            />
+          </label>
+          <Show when={uncovered}>
+            <Alert tone="warning" class="plan__note">{uncovered} {uncovered === 1 ? 'entry needs' : 'entries need'} a folder and will be skipped without one.</Alert>
+          </Show>
         </Show>
+        <Show when={b.errs.size}>
+          <ul class="plan__skips">
+            <For each={[...b.errs]}>{([id, why]) => <li><b>{nameOf(id)}</b> will be skipped: {why}</li>}</For>
+          </ul>
+        </Show>
+        <Show when={b.plan.unimportable.length}>
+          <Alert tone="warning" class="plan__note">Not in the stack, skipped: {b.plan.unimportable.join(', ')}.</Alert>
+        </Show>
+      </ImportPlan>
+    );
+  };
+
+  return (
+    <div class="browse" data-narrow={narrow() ? '' : undefined} data-open={openEntry() ? '' : undefined}>
+      <p class="visually-hidden" role="status" aria-live="polite">{announce()}</p>
+      <p class="visually-hidden" role="status" aria-live="polite">{rs()?.phase === 'done' ? (rs() as { line: string }).line : ''}</p>
+      <div class="browse__list" data-lenis-prevent="">
+        <div class="browse__head" role="toolbar" aria-label="Search and filter" ref={rovingBar}>
+          <div class="browse__bar">
+            <div class="browse__search">
+              <Icon name="search" size={14} />
+              <input
+                id="q"
+                ref={inputEl}
+                type="text"
+                role="searchbox"
+                aria-label={scopeWord() ? `Search ${scopeWord()}` : 'Search the catalog'}
+                aria-controls="entry-list"
+                placeholder={searchPlaceholder(scopeWord(), library())}
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck={false}
+                onInput={(e) => setQ(e.currentTarget.value)}
+              />
+            </div>
+            <RefreshButton state={rs()} disabled={importBusy()} onRefresh={() => void refresh()} />
+          </div>
+          <RefreshError
+            state={rs()}
+            disabled={importBusy() || rs()?.phase === 'working'}
+            onRefresh={() => void refresh()}
+            onDismiss={() => setRs(null)}
+          />
+          <Show when={!presetsMode()}>
+          <div class="browse__filters" role="group" aria-label={batchSelected() ? 'Selection' : 'Filter entries'}>
+            <Show
+              when={batchSelected()}
+              fallback={
+                <FilterMenu
+                  label="Filter"
+                  options={CHIPS.map((c) => ({ key: c.key, label: c.label, count: counts()[c.key] }))}
+                  on={chips()}
+                  onToggle={(k) => setChips((cur) => toggleChip(cur, k as ChipKey))}
+                  onClear={() => setChips(new Set<ChipKey>())}
+                />
+              }
+            >
+              <span class="browse__selcount" role="status">{selectionText()}</span>
+              <Button
+                size="sm"
+                variant="obsidian"
+                disabled={!!selectionReason()}
+                title={selectionReason() ?? `Review the Import plan for the ${selected().size} selected entries, then import them (i)`}
+                onClick={importSelection}
+              >
+                {`Import ${selected().size}`}
+              </Button>
+              <Button size="sm" title="Clear the selection (Esc)" onClick={clearSelection}>
+                Clear
+              </Button>
+            </Show>
+          </div>
+          </Show>
+          <div class="browse__slot">
+            <BatchBar
+              batch={batch()}
+              onCancel={cancelBatch}
+              onToggleDone={() => setBatch((b) => (b?.phase === 'done' ? { ...b, expanded: !b.expanded } : b))}
+              onDismiss={() => {
+                setBatch(null);
+                focusList();
+              }}
+            />
+          </div>
+          <Show when={library() && !presetsMode() && !routeSel().missing}>
+            <nav class="browse__path" aria-label="Folder path">
+              <IconButton label="Back to Components (Esc)" variant="ghost" onClick={upOne}>
+                <Icon name="chevronDown" size={14} class="browse__back" />
+              </IconButton>
+              <ol class="browse__crumbs">
+                <For each={crumbParts({ kind: 'kind', kindSingular: 'component', library: library() as string }, false).slice(1)}>
+                  {(p, i) => (
+                    <>
+                      <Show when={i() > 0}>
+                        <li class="browse__crumb-sep" aria-hidden="true">›</li>
+                      </Show>
+                      <li>
+                        <Show when={p.target?.to === 'kind' ? p.target : null} fallback={<span class="browse__crumb" aria-current="page">{i() === 0 ? p.label.replace(/^./, (c) => c.toUpperCase()) : p.label}</span>}>
+                          {(t) => <a class="browse__crumb" href={kindHref(t().kindSingular)}>{i() === 0 ? p.label.replace(/^./, (c) => c.toUpperCase()) : p.label}</a>}
+                        </Show>
+                      </li>
+                    </>
+                  )}
+                </For>
+              </ol>
+              <Show
+                when={openImport().state !== 'imported'}
+                fallback={<span class="erow__imported" title={openImport().reason ?? undefined}>Imported ✓</span>}
+              >
+                <Button
+                  size="sm"
+                  variant="obsidian"
+                  disabled={openImport().state === 'none' || importBusy()}
+                  title={openImport().reason ?? (importBusy() ? 'Another operation is running' : `Review the files ${openImport().ready.length} components would write, then import them`)}
+                  onClick={importOpenFolder}
+                >
+                  {openImport().state === 'none' ? 'Import all' : `Import all ${openImport().ready.length}`}
+                </Button>
+              </Show>
+            </nav>
+          </Show>
+        </div>
+        <Show when={note() && entries().length}>
+          <Alert
+            tone="warning"
+            icon="alert"
+            role="alert"
+            class="browse__stale"
+            actions={<Button size="sm" onClick={() => void load()}>Retry</Button>}
+          >
+            <span class="sa-alert__title">Showing saved catalog</span>
+            <span class="humanerr__next">{oneSentence(humanizeCliError(note() ?? ''))}</span>
+            <TechDetails raw={note() ?? ''} />
+          </Alert>
+        </Show>
+        <Show when={!(note() && !entries().length)} fallback={<ListError text={note() as string} onRetry={() => void load()} />}>
+          <Switch>
+            <Match when={!loaded()}>
+              <div class="browse__skeleton" role="status" aria-label="Loading the catalog">
+                <For each={[0, 1, 2, 3, 4, 5]}>{() => <span class="skel skel--row" />}</For>
+              </div>
+            </Match>
+            <Match when={!entries().length}>
+              <div class="browse__empty">
+                <p class="browse__empty-title">The stack has no entries yet</p>
+                <p class="dimtxt">Add entries to the stack checkout, then refresh.</p>
+              </div>
+            </Match>
+            <Match when={routeSel().missing}>
+              <div class="browse__empty">
+                <p class="browse__empty-title">That link does not match an entry</p>
+                <LinkButton href={kindHref('')}>Show the whole catalog</LinkButton>
+              </div>
+            </Match>
+            <Match when={presetsMode()}>
+              <PresetList query={q()} busy={importBusy()} onBegin={beginOp} onEnd={endOp} />
+            </Match>
+            <Match when={!visible().length}>
+              <div class="browse__empty">
+                <p class="browse__empty-title">{searching() ? `No entries match “${q().trim()}”` : 'No entries match these filters'}</p>
+                <Show when={searching() && kind() && elsewhere() > 0}>
+                  <p class="dimtxt">{elsewhere()} {elsewhere() === 1 ? 'match' : 'matches'} in {library() ? 'other libraries and kinds' : 'other kinds'}</p>
+                </Show>
+                <div class="browse__empty-actions">
+                  <Show when={searching() && kind()}>
+                    <LinkButton href={kindHref('')}>{library() ? 'Search all components' : 'Search all kinds'}</LinkButton>
+                  </Show>
+                  <Button onClick={clearFilters}>{searching() && !chips().size ? 'Clear search' : 'Clear filters'}</Button>
+                </div>
+              </div>
+            </Match>
+            <Match when={true}>
+              <div
+                id="entry-list"
+                ref={listEl}
+                class="browse__rows"
+                role="listbox"
+                tabindex="0"
+                aria-label={folderMode() ? `Component libraries, ${rows().length}` : `Catalog entries, ${visible().length}`}
+                aria-multiselectable="true"
+                aria-activedescendant={selIdx() >= 0 ? `opt-${selIdx()}` : undefined}
+              >
+                <For each={rows()}>
+                  {(r, i) =>
+                    r.kind === 'folder' ? (
+                      <FolderRow
+                        folder={r.folder}
+                        id={`opt-${i()}`}
+                        index={i()}
+                        total={rows().length}
+                        cursor={selIdx() === i()}
+                        selected={folderChecked(r.folder, selected())}
+                        imp={folderImport(r.folder.members, isImported)}
+                        busy={importBusy()}
+                        onPick={(ev) => onFolderPick(r.folder, ev)}
+                        onOpen={() => openFolder(r.folder)}
+                        onImport={() => importFolder(r.folder)}
+                      />
+                    ) : (
+                      <EntryRow
+                        e={r.entry}
+                        id={`opt-${i()}`}
+                        index={i()}
+                        total={rows().length}
+                        cursor={selIdx() === i()}
+                        selected={selected().has(r.entry.id)}
+                        query={q()}
+                        showId={searching() || !kind()}
+                        inLibrary={!!library()}
+                        imported={isImported(r.entry.id)}
+                        busy={importBusy()}
+                        onPick={(ev) => onRowPick(r.entry, ev)}
+                        onOpen={() => openDetail(r.entry)}
+                        onImport={() => openPlan(r.entry)}
+                      />
+                    )
+                  }
+                </For>
+              </div>
+            </Match>
+          </Switch>
+        </Show>
+      </div>
+      <Show when={openEntry()}>
+        {(oe) => (
+          <EntryPreview
+            scenario={props.scenario}
+            entry={oe()}
+            file={routeFile()}
+            source={source()}
+            entries={entries()}
+            index={index()}
+            entryHref={entryHref}
+            fileHref={fileHref}
+            busy={importBusy()}
+            narrow
+            onBack={closeDetail}
+            onClose={closeDetail}
+            onPlan={(e) => openPlan(e)}
+            onImported={() => void load()}
+            entryPlan={entryPlanNode()}
+          />
+        )}
+      </Show>
+      {/* A plan for an entry that is not open, and every batch plan, shows in a dialog. */}
+      <Show when={!!single() && openEntry()?.id !== single()?.id}>
+        <Portal><Modal onClose={() => !single()?.running && cancelSingle()}>
+          <div class="sa-dialog__content browse__plandlg" role="dialog" aria-modal="true" aria-label="Import plan" tabindex="-1" data-modal-content>
+            {entryPlanNode()}
+          </div>
+        </Modal></Portal>
+      </Show>
+      <Show when={!!batchConfirm(batch())}>
+        <Portal><Modal onClose={cancelBatch}>
+          <div class="sa-dialog__content browse__plandlg" role="dialog" aria-modal="true" aria-label="Import plan" tabindex="-1" data-modal-content>
+            {batchPlanNode()}
+          </div>
+        </Modal></Portal>
       </Show>
     </div>
   );
 }
 
 /**
- * Quiet sticky bar under the prompt: the selection actions (`N selected
- * [import] [clear]`), the batch dry-run confirm, the running progress, or
- * the finished summary. Nothing renders while idle.
+ * A failed refresh as one compact row in the toolbar, under the search: the
+ * first line in plain words (the raw stderr in the tooltip), Retry and
+ * Dismiss to its right. It rides with the sticky toolbar instead of a
+ * full-width block above the list.
+ */
+function RefreshError(props: {
+  state: RefreshState | null;
+  disabled: boolean;
+  onRefresh: () => void;
+  onDismiss: () => void;
+}) {
+  const text = (): string | null => {
+    const s = props.state;
+    return s?.phase === 'error' ? s.err : null;
+  };
+  return (
+    <Show when={text()}>
+      {(raw) => (
+        <Alert
+          tone="error"
+          icon="alert"
+          role="alert"
+          class="refresherr-inline"
+          actions={
+            <>
+              <Button size="sm" variant="ghost" disabled={props.disabled} onClick={() => props.onRefresh()}>
+                Retry
+              </Button>
+              <IconButton label="Dismiss the refresh error" variant="ghost" disabled={props.disabled} onClick={() => props.onDismiss()}>
+                <Icon name="x" size={14} />
+              </IconButton>
+            </>
+          }
+        >
+          <span class="refresherr-inline__text">
+            <span class="sa-alert__title">Showing saved catalog</span>
+            <span class="humanerr__next">{refreshErrorText(raw())}</span>
+            <TechDetails raw={raw()} />
+          </span>
+        </Alert>
+      )}
+    </Show>
+  );
+}
+
+function ListError(props: { text: string; onRetry: () => void }) {
+  return (
+    <div class="browse__empty">
+      <p class="browse__empty-title">The catalog did not load</p>
+      <CliErr text={props.text} />
+      <Button onClick={() => props.onRetry()}>Try again</Button>
+    </div>
+  );
+}
+
+/**
+ * Quiet bar under the filters: the running progress or the finished summary. The plan itself shows in the
+ * preview, so nothing renders for it here.
  */
 function BatchBar(props: {
   batch: BatchState | null;
-  selectedCount: number;
-  onImportSelection: () => void;
-  onClearSelection: () => void;
-  onBase: (value: string) => void;
-  onRun: () => void;
   onCancel: () => void;
-  onToggleConfirm: () => void;
   onToggleDone: () => void;
   onDismiss: () => void;
 }) {
-  const confirm = () => batchConfirm(props.batch);
   const running = () => batchRunning(props.batch);
   const done = () => batchDone(props.batch);
-  let confirmBar: HTMLDivElement | undefined;
-  let importBtn: HTMLButtonElement | undefined;
-  // Focus [import] once the confirm is actionable, unless the user already
-  // moved into the bar or is typing in a text field anywhere (search, an
-  // inline `to:` ask, the confirm's own base field): stealing focus
-  // mid-typing drops keystrokes. The button remounts with every confirm,
-  // so the marker fires once per confirm.
-  createEffect(() => {
-    const b = confirm();
-    if (!b || b.checking || !importBtn) return;
-    if (importBtn.dataset.armed) return;
-    importBtn.dataset.armed = '1';
-    const active = document.activeElement as (HTMLElement & { type?: string }) | null;
-    if (!confirmBar?.contains(active) && mayMoveFocusToImport(active)) importBtn.focus();
-  });
   return (
     <>
-      <Show when={confirm()}>
-        {(b) => {
-          const hits = () =>
-            b().targets.filter((t) => dryConflicts(b().dry.get(t.id) ?? { conflicts: [] }).length > 0);
-          const errors = () =>
-            b().targets.filter((t) => {
-              const d = b().dry.get(t.id);
-              return d && 'error' in d;
-            });
-          const uncovered = () => (b().base.trim() ? 0 : b().plan.needDest.length);
-          const skipped = () => b().plan.already.length + b().plan.unimportable.length + uncovered();
-          const lines = () => [
-            ...hits().flatMap((t) =>
-              dryConflicts(b().dry.get(t.id) ?? { conflicts: [] }).map((f) => `${t.id} — ${f}`),
-            ),
-            ...errors().map((t) => `${t.id} — ${(b().dry.get(t.id) as { error: string }).error.split('\n')[0]}`),
-          ];
-          return (
-            <div class="batchbar" ref={confirmBar}>
-              <span role="status">{`${b().label}: ${batchConfirmText({ count: b().targets.length, needDest: uncovered(), conflicts: hits().length, skipped: skipped() })}`}</span>
-              <Show when={b().checking} fallback={
-                <Show when={lines().length > 0}>
-                  <button
-                    class="btn"
-                    title="show what would collide"
-                    aria-expanded={b().expanded}
-                    onClick={() => props.onToggleConfirm()}
-                  >
-                    details
-                  </button>
-                </Show>
-              }>
-                <span class="dimtxt">checking…</span>
-              </Show>
-              <Show when={b().plan.needDest.length > 0}>
-                <span class="dimtxt">to:</span>
-                <input
-                  type="text"
-                  value={b().base}
-                  size={16}
-                  aria-label="shared destination folder for entries needing one"
-                  title="one folder for every entry needing a destination (each lands in <folder>/<name>); empty skips them"
-                  onInput={(ev) => props.onBase(ev.currentTarget.value)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === 'Enter') {
-                      ev.preventDefault();
-                      props.onRun();
-                    } else if (ev.key === 'Escape') {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      props.onCancel();
-                    }
-                  }}
-                />
-              </Show>
-              <button
-                class="btn"
-                ref={importBtn}
-                disabled={b().checking || !b().targets.length}
-                onClick={() => props.onRun()}
-              >
-                import
-              </button>
-              <button class="linklike" title="close without importing" onClick={() => props.onCancel()}>
-                cancel
-              </button>
-              <Show when={b().expanded && lines().length > 0}>
-                <pre class="raw conflict">{lines().join('\n')}</pre>
-              </Show>
-            </div>
-          );
-        }}
-      </Show>
       <Show when={running()}>
         {(b) => (
           <div class="batchbar">
             <span role="status">{`${b().label}: importing ${b().targets[b().at]?.id ?? ''} (${b().at + 1} of ${b().targets.length})`}</span>
-            <button class="linklike" title="stop after the current entry" onClick={() => props.onCancel()}>
-              cancel
-            </button>
+            <Button size="sm" title="Stop after the current entry" onClick={() => props.onCancel()}>
+              Cancel
+            </Button>
           </div>
         )}
       </Show>
       <Show when={done()}>
         {(b) => (
-          <div class="batchbar">
-            <span role="status">{`${b().label}: ${batchSummary(b().counts)}`}</span>
-            <Show when={b().counts.refused > 0}>
-              <button
-                class="btn"
-                title="show what was refused and why"
-                aria-expanded={b().expanded}
-                onClick={() => props.onToggleDone()}
-              >
-                details
-              </button>
-            </Show>
-            <button class="linklike" title="dismiss" onClick={() => props.onDismiss()}>
-              x
-            </button>
+          <Alert
+            class="batchdone"
+            tone={b().counts.refused > 0 ? 'warning' : 'success'}
+            icon={b().counts.refused > 0 ? 'alert' : 'check'}
+            role="status"
+            actions={
+              <>
+                <Show when={b().counts.refused > 0}>
+                  <Button size="sm" title="Show what was refused and why" aria-expanded={b().expanded} onClick={() => props.onToggleDone()}>
+                    Details
+                  </Button>
+                </Show>
+                <IconButton label="Dismiss" variant="ghost" onClick={() => props.onDismiss()}>
+                  <Icon name="x" size={14} />
+                </IconButton>
+              </>
+            }
+          >
+            <span>{`${b().label}: ${batchSummary(b().counts)}`}</span>
             <Show when={b().expanded}>
               <For each={b().refusals}>
                 {(r) => (
                   <div class="batchref">
-                    <span class="conflict">{`${r.id}: ${r.line}`}</span>
-                    <Show when={r.lookalikes.length} fallback={<CliErr text={r.err} />}>
-                      <pre class="raw">{r.lookalikes.join('\n')}</pre>
-                    </Show>
+                    <span class="batchref__line">{`${nameOf(r.id)}: ${r.line}`}</span>
+                    <TechDetails raw={r.err} />
                   </div>
                 )}
               </For>
             </Show>
-          </div>
+          </Alert>
         )}
       </Show>
-      <Show when={!props.batch && props.selectedCount > 0}>
-        <div class="batchbar">
-          <span>{`${props.selectedCount} selected`}</span>
-          <button class="btn" title="import every selected row in turn" onClick={() => props.onImportSelection()}>
-            import
-          </button>
-          <button class="linklike" title="clear the selection" onClick={() => props.onClearSelection()}>
-            clear
-          </button>
-        </div>
-      </Show>
     </>
-  );
-}
-
-/** One catalog row: sprite, name, dotted leader, preview, face, size, import slot. */
-function EntryRow(
-  props: {
-    e: JsonEntry;
-    byId: boolean;
-    uncommitted: Set<string>;
-    index: number;
-    sel: number;
-    entryHref: (id: string) => string;
-    checked: boolean;
-    bres: BatchRowRes | null;
-    landed: boolean;
-    batchBusy: boolean;
-    onRowClick: (e: JsonEntry, ev: MouseEvent) => void;
-    onGutterDown: (e: JsonEntry, ev: MouseEvent) => void;
-    onGutterOver: (e: JsonEntry, ev: MouseEvent) => void;
-    onBatchToggle: (id: string) => void;
-  } & QiProps,
-) {
-  let rowEl: HTMLAnchorElement | undefined;
-  const selected = createMemo(() => props.sel === props.index);
-  const markers = () => entryMarkers(props.e, props.uncommitted);
-  const [thumb, setThumb] = createSignal<string | null>(null);
-
-  onMount(() => {
-    const file = props.e.preview;
-    if (!file || !rowEl) return;
-    const id = props.e.id;
-    const c = config();
-    const key = previewKey(sourceKey(c), id, file);
-    // Revisits render from the cache with no fetch at all.
-    const hit = previewCache.peek(key);
-    if (hit !== undefined) {
-      setThumb(hit);
-      return;
-    }
-    // Fetch only once the row is near the viewport; skip rows scrolled past before their turn.
-    let alive = true;
-    const stop = whenVisible(rowEl, () => {
-      void previewCache
-        .load(key, () => fetchImageUrl(c, id, file), () => alive)
-        .then((url) => {
-          if (alive && url) setThumb(url);
-        });
-    });
-    onCleanup(() => {
-      alive = false;
-      stop();
-    });
-  });
-
-  const active = (): QiState | null => {
-    const s = props.qi;
-    return s?.id === props.e.id ? s : null;
-  };
-  const asking = (): boolean => props.ask?.id === props.e.id;
-  const imported = (): boolean => props.importedIds.has(props.e.id) || props.landed;
-  const opBusy = (): boolean =>
-    (props.qi?.phase === 'working' && props.qi.id !== props.e.id) || props.batchBusy || opsBusy();
-  const importTitle = (): string =>
-    needsImportDest(props.e)
-      ? 'import to a folder you choose'
-      : `import to ${defaultImportDest(props.e)}`;
-  /** The finished inline result, if any: a row import and a batch never overlap. */
-  const result = (): RowRes | null => {
-    const s = active();
-    if (s && s.phase !== 'working') return s;
-    const b = props.bres;
-    return b && b.phase !== 'working' ? b : null;
-  };
-  const resultIsQi = (): boolean => {
-    const s = active();
-    return !!s && s.phase !== 'working';
-  };
-  const working = (): boolean => active()?.phase === 'working' || props.bres?.phase === 'working';
-
-  return (
-    <div class="qi" data-checked={props.checked ? '' : undefined}>
-      <div class="qirow">
-        <span
-          class="gut"
-          data-lenis-prevent=""
-          data-on={props.checked ? '' : undefined}
-          title="select row (drag across rows to select several)"
-          aria-hidden="true"
-          onMouseDown={(ev) => props.onGutterDown(props.e, ev)}
-          onMouseEnter={(ev) => props.onGutterOver(props.e, ev)}
-        />
-        <a
-          ref={rowEl}
-          class="row"
-          href={props.entryHref(props.e.id)}
-          data-row={props.index}
-          data-nav=""
-          data-sel={selected() ? '' : undefined}
-          onClick={(ev) => props.onRowClick(props.e, ev)}
-        >
-          <Sprite kind={props.e.kind} origin={props.e.origin} />
-          <span class="nm">{props.byId ? props.e.id : (props.e.name ?? props.e.id)}</span>
-          <Markers notCommitted={markers().notCommitted} uncommittedInStack={markers().uncommittedInStack} />
-          <span class="lead" aria-hidden="true" />
-          <Show when={thumb()}>{(src) => <img class="rthumb" src={src()} alt="" />}</Show>
-          <Face status={props.e.status} />
-          <span class="num">{`${props.e.files}f ${fmtBytes(props.e.bytes)}`}</span>
-        </a>
-        <span class="qiact">
-          <Show
-            when={!imported() && props.e.committed}
-            fallback={
-              <Show when={imported()}>
-                <span class="marker" title="already imported in this project">
-                  imported
-                </span>
-              </Show>
-            }
-          >
-            <Show when={working()} fallback={
-              <button
-                class="btn"
-                disabled={opBusy()}
-                title={importTitle()}
-                aria-label={`import ${props.e.id}`}
-                onClick={() => props.onImport(props.e)}
-              >
-                import
-              </button>
-            }>
-              <span class="dimtxt">working</span>
-            </Show>
-          </Show>
-        </span>
-      </div>
-      <Show when={asking()}>
-        <QiAsk
-          id={props.e.id}
-          value={props.ask?.value ?? ''}
-          opBusy={opBusy()}
-          onInput={props.onAskInput}
-          onConfirm={props.onAskConfirm}
-          onClose={props.onAskClose}
-        />
-      </Show>
-      <Show when={result()}>
-        {(r) => (
-          <RowResult
-            res={r()}
-            onToggle={() => (resultIsQi() ? props.onToggleFull() : props.onBatchToggle(props.e.id))}
-          />
-        )}
-      </Show>
-    </div>
-  );
-}
-
-function KindHome(props: {
-  agg: Agg;
-  entries: JsonEntry[];
-  sel: number;
-  kindHref: (kind: string) => string;
-  allHref: string;
-}) {
-  const max = () => Math.max(1, ...props.agg.stats.map((s) => s.n));
-  return (
-    <>
-      <div class="krows">
-        <For each={props.agg.stats}>
-          {(s, i) => (
-            <Krow index={i()} sel={props.sel} href={props.kindHref(s.kind)} zero={!s.n}>
-              <Sprite kind={s.kind} />
-              <span class="nm">{pluralOf(s.kind)}</span>
-              <Bar n={s.n} max={max()} />
-              <span class="num">{s.n}</span>
-            </Krow>
-          )}
-        </For>
-        <Krow index={props.agg.stats.length} sel={props.sel} href={props.allHref} zero={false}>
-          <span class="sp">~</span>
-          <span class="nm">all</span>
-          <span class="bar" aria-hidden="true" />
-          <span class="num">{props.agg.total}</span>
-        </Krow>
-      </div>
-      <Legend entries={props.entries} />
-    </>
-  );
-}
-
-/**
- * The inline destination field for entries that must not import blindly.
- * Its own component so onMount (after insertion, unlike ref) can focus the
- * field and select the prefill.
- */
-function QiAsk(props: {
-  id: string;
-  value: string;
-  opBusy: boolean;
-  onInput: (value: string) => void;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  let inputEl: HTMLInputElement | undefined;
-  onMount(() => {
-    inputEl?.focus();
-    inputEl?.select();
-  });
-  return (
-    <div class="qiask">
-      <span class="dimtxt">to:</span>
-      <input
-        type="text"
-        value={props.value}
-        size={24}
-        aria-label={`import destination for ${props.id}`}
-        ref={inputEl}
-        onInput={(ev) => props.onInput(ev.currentTarget.value)}
-        onKeyDown={(ev) => {
-          if (ev.key === 'Enter') {
-            ev.preventDefault();
-            props.onConfirm();
-          } else if (ev.key === 'Escape') {
-            ev.preventDefault();
-            ev.stopPropagation();
-            props.onClose();
-          }
-        }}
-      />
-      <button class="btn" disabled={!props.value.trim() || props.opBusy} onClick={() => props.onConfirm()}>
-        import
-      </button>
-      <button class="linklike" title="close without importing" onClick={() => props.onClose()}>
-        esc
-      </button>
-    </div>
-  );
-}
-
-/** Dim key hint under every browse list (never in the entry detail). */
-function ListHint() {
-  return <p class="dimtxt listhint">↑↓ move · shift extend · i import · space select · a all · r refresh</p>;
-}
-
-/** Flat entry list: the kind view, the `all` list and search results. */
-function EntryList(
-  props: {
-    byId: boolean;
-    entries: JsonEntry[];
-    uncommitted: Set<string>;
-    sel: number;
-    entryHref: (id: string) => string;
-    batchLabel: string;
-  } & QiProps &
-    BatchListProps,
-) {
-  const n = () => (props.onImportAll ? importAllCount(props.entries, props.importedIds) : 0);
-  const opBusy = (): boolean => props.batchBusy || props.qi?.phase === 'working';
-  return (
-    <Show when={props.entries.length} fallback={<Empty>(._.) none</Empty>}>
-      <Show when={n() > 0}>
-        <div class="listhead">
-          <span class="dimtxt">{`${props.entries.length} ${props.entries.length === 1 ? 'entry' : 'entries'}`}</span>
-          <button
-            class="btn"
-            disabled={opBusy()}
-            title={`import every not-imported entry below (${n()})`}
-            onClick={() => props.onImportAll?.(props.batchLabel, props.entries)}
-          >
-            {`import all ${n()}`}
-          </button>
-        </div>
-      </Show>
-      <div class="rows">
-        <For each={props.entries}>
-          {(e, i) => (
-            <EntryRow
-              e={e}
-              byId={props.byId}
-              uncommitted={props.uncommitted}
-              index={i()}
-              sel={props.sel}
-              entryHref={props.entryHref}
-              qi={props.qi}
-              ask={props.ask}
-              importedIds={props.importedIds}
-              onImport={props.onImport}
-              onAskInput={props.onAskInput}
-              onAskConfirm={props.onAskConfirm}
-              onAskClose={props.onAskClose}
-              onToggleFull={props.onToggleFull}
-              checked={props.selected.has(e.id)}
-              bres={props.batchRes.get(e.id) ?? null}
-              landed={props.landed.has(e.id)}
-              batchBusy={props.batchBusy}
-              onRowClick={props.onRowClick}
-              onGutterDown={props.onGutterDown}
-              onGutterOver={props.onGutterOver}
-              onBatchToggle={props.onBatchToggle}
-            />
-          )}
-        </For>
-      </div>
-      <ListHint />
-    </Show>
-  );
-}
-
-/**
- * Components kind view, grouped by library: one header per library
- * (`components/<lib>`, member count, extends/default markers), member rows
- * beneath. Headers carry no data-row, so the keyboard cursor skips them;
- * member indices continue the rows() order across groups (then ungrouped rows).
- */
-function ComponentKindView(
-  props: {
-    groups: LibraryGroup[];
-    ungrouped: JsonEntry[];
-    uncommitted: Set<string>;
-    sel: number;
-    entryHref: (id: string) => string;
-  } & QiProps &
-    BatchListProps,
-) {
-  type Block =
-    | { kind: 'lib'; lib: LibraryGroup['lib']; members: JsonEntry[]; start: number }
-    | { kind: 'plain'; members: JsonEntry[]; start: number };
-  const blocks = createMemo((): Block[] => {
-    const out: Block[] = [];
-    let at = 0;
-    for (const g of props.groups) {
-      out.push({ kind: 'lib', lib: g.lib, members: g.members, start: at });
-      at += g.members.length;
-    }
-    if (props.ungrouped.length) out.push({ kind: 'plain', members: props.ungrouped, start: at });
-    return out;
-  });
-  const opBusy = (): boolean => props.batchBusy || props.qi?.phase === 'working';
-  const rowProps = (e: JsonEntry) => ({
-    checked: props.selected.has(e.id),
-    bres: props.batchRes.get(e.id) ?? null,
-    landed: props.landed.has(e.id),
-  });
-  return (
-    <Show when={blocks().length} fallback={<Empty>(._.) none</Empty>}>
-      <div>
-        <For each={blocks()}>
-          {(b) =>
-            b.kind === 'lib' ? (
-              <section class="libgroup">
-                <div class="libhead">
-                  <Sprite kind="library" />
-                  <span class="nm">components/{b.lib.name}</span>
-                  <span class="dimtxt">{libraryMeta(b.lib, b.members.length)}</span>
-                  <Show when={props.onImportAll && importAllCount(b.members, props.importedIds) > 0}>
-                    <button
-                      class="btn libimport"
-                      disabled={opBusy()}
-                      title={`import every not-imported member below (${importAllCount(b.members, props.importedIds)})`}
-                      onClick={() => props.onImportAll?.(`components/${b.lib.name}`, b.members)}
-                    >
-                      {`import all ${importAllCount(b.members, props.importedIds)}`}
-                    </button>
-                  </Show>
-                </div>
-                <div class="rows">
-                  <For each={b.members}>
-                    {(e, i) => (
-                      <EntryRow
-                        e={e}
-                        byId={false}
-                        uncommitted={props.uncommitted}
-                        index={b.start + i()}
-                        sel={props.sel}
-                        entryHref={props.entryHref}
-                        qi={props.qi}
-                        ask={props.ask}
-                        importedIds={props.importedIds}
-                        onImport={props.onImport}
-                        onAskInput={props.onAskInput}
-                        onAskConfirm={props.onAskConfirm}
-                        onAskClose={props.onAskClose}
-                        onToggleFull={props.onToggleFull}
-                        checked={rowProps(e).checked}
-                        bres={rowProps(e).bres}
-                        landed={rowProps(e).landed}
-                        batchBusy={props.batchBusy}
-                        onRowClick={props.onRowClick}
-                        onGutterDown={props.onGutterDown}
-                        onGutterOver={props.onGutterOver}
-                        onBatchToggle={props.onBatchToggle}
-                      />
-                    )}
-                  </For>
-                </div>
-              </section>
-            ) : (
-              <div>
-                <Show when={props.onImportAll && importAllCount(b.members, props.importedIds) > 0}>
-                  <div class="listhead">
-                    <span class="dimtxt">{`${b.members.length} ${b.members.length === 1 ? 'entry' : 'entries'}`}</span>
-                    <button
-                      class="btn"
-                      disabled={opBusy()}
-                      title={`import every not-imported entry below (${importAllCount(b.members, props.importedIds)})`}
-                      onClick={() => props.onImportAll?.('components', b.members)}
-                    >
-                      {`import all ${importAllCount(b.members, props.importedIds)}`}
-                    </button>
-                  </div>
-                </Show>
-                <div class="rows">
-                  <For each={b.members}>
-                    {(e, i) => (
-                      <EntryRow
-                        e={e}
-                        byId={false}
-                        uncommitted={props.uncommitted}
-                        index={b.start + i()}
-                        sel={props.sel}
-                        entryHref={props.entryHref}
-                        qi={props.qi}
-                        ask={props.ask}
-                        importedIds={props.importedIds}
-                        onImport={props.onImport}
-                        onAskInput={props.onAskInput}
-                        onAskConfirm={props.onAskConfirm}
-                        onAskClose={props.onAskClose}
-                        onToggleFull={props.onToggleFull}
-                        checked={rowProps(e).checked}
-                        bres={rowProps(e).bres}
-                        landed={rowProps(e).landed}
-                        batchBusy={props.batchBusy}
-                        onRowClick={props.onRowClick}
-                        onGutterDown={props.onGutterDown}
-                        onGutterOver={props.onGutterOver}
-                        onBatchToggle={props.onBatchToggle}
-                      />
-                    )}
-                  </For>
-                </div>
-              </div>
-            )
-          }
-        </For>
-      </div>
-      <ListHint />
-    </Show>
-  );
-}
-
-/** Image bytes as a data URL for a row thumbnail or preview; undefined when the fetch failed. */
-async function fetchImageUrl(c: AppConfig | null, id: string, file: string): Promise<string | null | undefined> {
-  try {
-    const out = await stackRun('show', showFileArgs(id, file), c?.project ?? '.', c?.stackPath);
-    const b = toShowFile(fromStackOut<ShowFileJson>(out));
-    return b.base64 ? `data:${mimeFor(file)};base64,${b.base64}` : null;
-  } catch {
-    return undefined;
-  }
-}
-
-async function showFile(c: AppConfig | null, id: string, file: string): Promise<FileBody> {
-  const out = await stackRun('show', showFileArgs(id, file), c?.project ?? '.', c?.stackPath);
-  return toShowFile(fromStackOut<ShowFileJson>(out));
-}
-
-function EntryDetail(props: {
-  scenario: string;
-  id: string;
-  file: string | null;
-  /** project + stack checkout key: a change here refetches, anything else does not. */
-  source: string;
-  entries: JsonEntry[];
-  index: CatalogIndex;
-  sel: number;
-  entryHref: (id: string) => string;
-  fileHref: (id: string, file: string) => string;
-  onFiles: (files: ShowFile[]) => void;
-  onImported: () => void;
-}) {
-  const [doc, setDoc] = createSignal<Doc | null>(null);
-  const [error, setError] = createSignal<string | null>(null);
-  const [to, setTo] = createSignal('');
-  const [sections, setSections] = createSignal<OpSection[] | null>(null);
-  const [failed, setFailed] = createSignal<string | null>(null);
-  const [pending, setPending] = createSignal(false);
-  const [fileBody, setFileBody] = createSignal<FileBody | null>(null);
-  const [fileNote, setFileNote] = createSignal<string | null>(null);
-  const [previews, setPreviews] = createSignal<{ path: string; url: string }[]>([]);
-  let docGen = 0;
-  let bodyGen = 0;
-
-  const e = createMemo(() => props.index.byId.get(props.id) ?? null);
-  // The open file, defaulting to the entry doc, under h2. Memoized so a list refresh does not refetch it.
-  const bodyPath = createMemo(() => props.file ?? e()?.doc.slice(props.id.length + 1) ?? null);
-  const locked = createMemo(() => lock().rows.find((r) => r.id === props.id) ?? null);
-  const citedBy = (): string[] => props.index.citedBy.get(props.id) ?? [];
-  const linked = (ids: string[] | undefined): string[] => (ids ?? []).filter((id) => props.index.byId.has(id));
-  const upstream = createMemo(() => {
-    const s = doc()?.manifest['source'];
-    return s && typeof s === 'object' ? (s as Record<string, unknown>) : null;
-  });
-  const upstreamUrl = (): string | null => {
-    const u = upstream()?.['url'];
-    return typeof u === 'string' ? u : null;
-  };
-
-  // The destination belongs to the project it was typed for.
-  createEffect(on(() => props.source, () => setTo(''), { defer: true }));
-
-  // Doc and previews refetch for this id and source only, never for config edits.
-  createEffect(
-    on(
-      [() => props.id, () => props.source],
-      ([id, source]) => {
-        const c = config();
-        const gen = ++docGen;
-        setDoc(null);
-        setError(null);
-        setSections(null);
-        setFailed(null);
-        setPreviews([]);
-        props.onFiles([]);
-        stackRun('show', [id, '--json'], c?.project ?? '.', c?.stackPath).then(
-          (out) => {
-            if (gen !== docGen) return;
-            try {
-              const d = toShowDoc(fromStackOut<ShowJson>(out));
-              setDoc(d);
-              props.onFiles(d.files);
-              const imgs = d.files.filter((f) => IMG_RE.test(f.path)).slice(0, 4);
-              void Promise.all(
-                imgs.map((f) =>
-                  previewCache
-                    .load(previewKey(source, id, f.path), () => fetchImageUrl(c, id, f.path), () => gen === docGen)
-                    .then((url) => (url ? { path: f.path, url } : null)),
-                ),
-              ).then((got) => {
-                if (gen === docGen) setPreviews(got.filter((g): g is { path: string; url: string } => g !== null));
-              });
-            } catch (err) {
-              setError(errText(err));
-            }
-          },
-          (err) => {
-            if (gen === docGen) setError(errText(err));
-          },
-        );
-      },
-    ),
-  );
-
-  createEffect(
-    on(
-      [bodyPath, () => props.id, () => props.source],
-      ([p, id]) => {
-        const gen = ++bodyGen;
-        setFileBody(null);
-        setFileNote(null);
-        if (!p) return;
-        showFile(config(), id, p).then(
-          (b) => {
-            if (gen === bodyGen) setFileBody(b);
-          },
-          (err) => {
-            if (gen === bodyGen) setFileNote(errText(err));
-          },
-        );
-      },
-    ),
-  );
-
-  async function doImport() {
-    const c = config();
-    if (!c?.project || pending() || opsBusy()) return;
-    const dest = to().trim();
-    setPending(true);
-    beginOp();
-    setSections(null);
-    setFailed(null);
-    try {
-      const out = await stackRun('import', importArgs(props.id, dest), c.project, c.stackPath);
-      setSections(describeImport(fromStackOut(out)));
-      await refreshLock();
-      // Import creates stack.toml implicitly: the project page's set-up slot
-      // must re-check on the next visit.
-      await refreshReport();
-      props.onImported();
-    } catch (err) {
-      setFailed(errText(err));
-    } finally {
-      setPending(false);
-      endOp();
-    }
-  }
-
-  const lookalikes = () => (failed() ? refusalFiles(failed() as string) : []);
-
-  return (
-    <div>
-      <Show when={error()}>{(msg) => <CliErr text={msg()} />}</Show>
-      <Show when={doc()}>
-        {(d) => {
-          const size = d().files.reduce((a, f) => a + f.size, 0);
-          return (
-            <div>
-              <h1 class="title" id="stack-entry">
-                <Sprite kind={e()?.kind ?? ''} origin={e()?.origin ?? ''} />
-                <span>{e()?.name ?? props.id}</span>
-                <Face status={e()?.status ?? ''} />
-              </h1>
-              <Show when={e()?.summary}>
-                <p class="summary">{e()?.summary}</p>
-              </Show>
-              <Show when={!d().committed}>
-                <p class="conflict" role="alert">
-                  not committed in the stack: can't import
-                </p>
-              </Show>
-              <Show when={locked()}>{(l) => <p>imported → {l().path}</p>}</Show>
-              <dl>
-                <Show when={d().usage}>
-                  <dt>usage</dt>
-                  <dd>{d().usage}</dd>
-                </Show>
-                <dt>size</dt>
-                <dd>{`${d().files.length} files, ${fmtBytes(size)}`}</dd>
-                <Show when={e()?.targets?.length}>
-                  <dt>targets</dt>
-                  <dd>{e()?.targets.join(' ')}</dd>
-                </Show>
-                <Show when={e()?.tags?.length}>
-                  <dt>tags</dt>
-                  <dd>
-                    <div class="chips">
-                      <For each={e()?.tags ?? []}>{(t) => <span>{t}</span>}</For>
-                    </div>
-                  </dd>
-                </Show>
-                <Show when={linked(e()?.requires).length}>
-                  <dt>requires</dt>
-                  <dd>
-                    <div class="rlinks">
-                      <For each={linked(e()?.requires)}>
-                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
-                      </For>
-                    </div>
-                  </dd>
-                </Show>
-                <Show when={linked(e()?.related).length}>
-                  <dt>related</dt>
-                  <dd>
-                    <div class="rlinks">
-                      <For each={linked(e()?.related)}>
-                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
-                      </For>
-                    </div>
-                  </dd>
-                </Show>
-                <Show when={citedBy().length}>
-                  <dt>cited by</dt>
-                  <dd>
-                    <div class="rlinks">
-                      <For each={citedBy()}>
-                        {(r) => <a href={props.entryHref(r)}>{props.index.byId.get(r)?.name ?? r}</a>}
-                      </For>
-                    </div>
-                  </dd>
-                </Show>
-                <Show when={upstream()}>
-                  <dt>upstream</dt>
-                  <dd>
-                    <Show
-                      when={upstreamUrl() && /^https?:/.test(upstreamUrl() as string)}
-                      fallback={upstreamUrl() ?? ''}
-                    >
-                      <a href={upstreamUrl() as string} target="_blank" rel="noopener noreferrer">
-                        {(upstreamUrl() as string).replace(/^https?:\/\/(www\.)?/, '')}
-                      </a>
-                    </Show>
-                    <Show when={typeof upstream()?.['ref'] === 'string'}>
-                      <span class="dim">{` @ ${String(upstream()?.['ref']).slice(0, 7)}`}</span>
-                    </Show>
-                    <Show when={typeof upstream()?.['license'] === 'string'}>
-                      <span class="dim">{` ${upstream()?.['license']}`}</span>
-                    </Show>
-                    <Show when={upstream()?.['modified']}>
-                      <span class="dim"> modified</span>
-                    </Show>
-                  </dd>
-                </Show>
-              </dl>
-
-              <Show when={!locked() && d().committed}>
-                <h2>import</h2>
-                <p>
-                  <input
-                    type="text"
-                    value={to()}
-                    onInput={(ev) => setTo(ev.currentTarget.value)}
-                    placeholder="--to"
-                    aria-label="import destination inside the project"
-                    size={24}
-                  />{' '}
-                  <button class="btn" disabled={pending() || opsBusy()} onClick={() => void doImport()}>
-                    {pending() ? 'importing' : opsBusy() ? 'working' : 'import'}
-                  </button>
-                </p>
-              </Show>
-
-              <Show when={lookalikes().length > 0}>
-                <p class="conflict" role="alert">
-                  untracked look-alikes, nothing written:
-                </p>
-                <pre class="raw">{lookalikes().join('\n')}</pre>
-              </Show>
-              <Show when={failed() && !lookalikes().length}>
-                <CliErr text={failed() as string} />
-              </Show>
-              <Show when={sections()}>
-                {(s) => (
-                  <>
-                    <OpResult sections={s()} />
-                    <p class="dimtxt">
-                      <a href={href(props.scenario, 'project')}>→ project</a>
-                    </p>
-                  </>
-                )}
-              </Show>
-
-              <Show when={previews().length}>
-                <div>
-                  <h2>preview</h2>
-                  <div class="previews">
-                    <For each={previews()}>
-                      {(p) => (
-                        <a href={props.fileHref(props.id, p.path)}>
-                          <img src={p.url} alt={p.path} />
-                        </a>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </Show>
-
-              <h2>files</h2>
-              <Show when={d().files.length} fallback={<Empty>(._.) none</Empty>}>
-                <FileTree
-                  files={d().files}
-                  name={e()?.name ?? props.id}
-                  cur={bodyPath()}
-                  sel={props.sel}
-                  selBase={0}
-                  fileHref={(p) => props.fileHref(props.id, p)}
-                  fmtSize={fmtBytes}
-                />
-              </Show>
-              <Show when={bodyPath()}>
-                {(p) => (
-                  <>
-                    <h2>{p()}</h2>
-                    <Show when={fileNote()}>{(msg) => <p class="note">{msg()}</p>}</Show>
-                    <Show when={fileBody()}>
-                      {(b) => (
-                        <FileView
-                          body={b()}
-                          entries={props.entries}
-                          entryId={props.id}
-                          entryHref={props.entryHref}
-                          fileHref={props.fileHref}
-                        />
-                      )}
-                    </Show>
-                  </>
-                )}
-              </Show>
-            </div>
-          );
-        }}
-      </Show>
-    </div>
-  );
-}
-
-function FileView(props: {
-  body: FileBody;
-  entries: JsonEntry[];
-  entryId: string;
-  entryHref: (id: string) => string;
-  fileHref: (id: string, file: string) => string;
-}) {
-  const b = () => props.body;
-  return (
-    <Show
-      when={!b().base64}
-      fallback={
-        <div class="preview">
-          <img src={`data:${mimeFor(b().file)};base64,${b().base64}`} alt={b().file} />
-        </div>
-      }
-    >
-      <Show when={!b().binary} fallback={<Empty>binary {fmtBytes(b().size)} — open it from the checkout.</Empty>}>
-        <Show when={b().markdown} fallback={<pre class="raw">{b().text}</pre>}>
-          <Markdown
-            text={b().text}
-            entryId={props.entryId}
-            file={b().file}
-            entries={props.entries}
-            entryHref={props.entryHref}
-            fileHref={props.fileHref}
-          />
-        </Show>
-      </Show>
-    </Show>
   );
 }

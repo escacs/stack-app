@@ -2,8 +2,8 @@
 // value; errors stay plain text on stderr with a nonzero exit, so stdout
 // stays parseable. Shapes mirror tools/stack/cli.mjs (list/search/show) and
 // tools/stack/imports.mjs (status/import/sync/update/remove json:true).
-// This module supersedes the text parsers in parse.ts (parseList, parseShow,
-// parseStatus): views must decode JSON through here instead.
+// This module supersedes the text parsers in parse.ts (parseList, parseShow):
+// views must decode JSON through here instead.
 import type { StackOut } from './bridge';
 import type { StatusRow } from './parse';
 
@@ -74,8 +74,15 @@ export type StatusJsonRow = {
   commit: string;
   local: string[];
   upstream: string[];
+  /** Deleted imported files (the mock and newer CLIs report them; older ones only list them in `local`). */
+  missing?: string[];
+  /** The CLI's own state word (newer CLIs); the app derives the same one from the other fields when absent. */
+  state?: CliState;
   gone: boolean;
 };
+
+/** The state word `status --json` gives a row, highest priority first: gone > missing > update-available > edited > up-to-date. */
+export type CliState = 'up-to-date' | 'update-available' | 'edited' | 'missing' | 'gone';
 
 export type StatusJson = { command: 'status'; commit: string; rows: StatusJsonRow[] };
 
@@ -98,17 +105,29 @@ export type ImportDryRunJson = {
   gitignore: 'updated' | 'unchanged';
 };
 
+/** `sync`, `restore` and `sync --restore` share one shape; `command` is "restore" for the latter two. */
 export type SyncJson = {
-  command: 'sync';
+  command: 'sync' | 'restore';
+  dryRun?: boolean;
   restored: string[];
   kept: string[];
   skipped: string[];
+  pruned?: string[];
+  worker?: { name: string; id: string; path: string; source: string } | null;
 };
+
+/** What an update did (or, in a dry run, would do) with one file the stack changed. */
+export type UpdateFileOutcome = 'updated' | 'kept-mine' | 'took-upstream' | 'conflict-markers' | 'unchanged';
+export type UpdateFile = { path: string; outcome: UpdateFileOutcome };
 
 export type UpdateJson = {
   command: 'update';
+  dryRun?: boolean;
   commit: string;
-  updated: { id: string; changed: number }[];
+  /** `files` is absent on older CLIs. */
+  updated: { id: string; changed: number; files?: UpdateFile[] }[];
+  /** --keep-mine / --take-upstream files that matched no file both sides changed. */
+  unmatched?: string[];
   conflicts: string[];
   merged: string[];
   kept: string[];
@@ -221,9 +240,45 @@ export function toStatusRows(s: StatusJson): { commit: string | null; rows: Stat
       path: r.path,
       local: [...r.local],
       upstreamCount: r.upstream.length,
+      upstream: [...r.upstream],
+      ...(Array.isArray(r.missing) ? { missing: [...r.missing] } : {}),
+      ...(r.state ? { state: r.state } : {}),
       gone: r.gone,
     })),
   };
+}
+
+/** True when some row came without the CLI's `missing` list (an older CLI): only then are files looked up on disk. */
+export const lacksMissing = (rows: readonly StatusRow[]): boolean => rows.some((r) => r.missing === undefined);
+
+/**
+ * The stack CLI reports a deleted imported file as a local change and has no
+ * separate list for it, so rows that carry no `missing` field get one here:
+ * each local file is looked up in the project, and the ones that are gone are
+ * the missing ones. `exists` answers per project-relative path; a lookup that
+ * fails counts as present (never claim a deletion that was not seen).
+ */
+export async function withMissing(
+  rows: readonly StatusRow[],
+  exists: (path: string) => Promise<boolean>,
+): Promise<StatusRow[]> {
+  return Promise.all(
+    rows.map(async (r) => {
+      if (r.missing || r.gone || !r.local.length) return r;
+      const gone = await Promise.all(
+        r.local.map(async (f) => {
+          const base = r.path.trim().replace(/\/+$/, '');
+          const path = !base || base === '.' ? f : `${base}/${f}`;
+          try {
+            return (await exists(path)) ? null : f;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return { ...r, missing: gone.filter((f): f is string => f !== null) };
+    }),
+  );
 }
 
 /** Entry doc file name: manifest `entry`, else the kind default. */
@@ -325,6 +380,35 @@ export function importArgs(id: string, to: string): string[] {
   return dest ? [id, '--to', dest, '--json'] : [id, '--json'];
 }
 
+/** How a file both sides changed is settled: conflict markers (the default), keep yours, or take the stack's. */
+export type FileChoice = 'merge' | 'mine' | 'upstream';
+
+/**
+ * Args for `update <id>` from the per-file choices. Only `mine` and
+ * `upstream` become flags (one per file; `merge` is what the CLI does with no
+ * flag). A backup `<file>.mine` is saved for taken files unless noBackup.
+ */
+export function updateArgs(
+  id: string,
+  choices: Readonly<Record<string, FileChoice>> = {},
+  opts: { dryRun?: boolean; noBackup?: boolean } = {},
+): string[] {
+  const out = [id];
+  const files = Object.keys(choices).sort();
+  for (const f of files) if (choices[f] === 'mine') out.push('--keep-mine', f);
+  const takes = files.filter((f) => choices[f] === 'upstream');
+  for (const f of takes) out.push('--take-upstream', f);
+  if (opts.noBackup && takes.length) out.push('--no-backup');
+  if (opts.dryRun) out.push('--dry-run');
+  out.push('--json');
+  return out;
+}
+
+/** Args for `restore`: one entry's missing files, several, or (no ids) the whole project. */
+export function restoreArgs(ids: readonly string[] = []): string[] {
+  return [...ids, '--json'];
+}
+
 /** Args for `import --dry-run --json`: the plan plus its collisions; writes nothing. */
 export function importDryRunArgs(id: string, to: string): string[] {
   const dest = to.trim();
@@ -342,6 +426,9 @@ export function defaultImportDest(e: Pick<JsonEntry, 'id' | 'kind' | 'name' | 'p
   if (e.payload) return '.';
   return `.stack/${e.id}`;
 }
+
+/** How a destination reads in the UI: the bare `.` is the project root. */
+export const destLabel = (d: string): string => (!d.trim() || d.trim() === '.' ? 'project root' : d);
 
 /**
  * Whether the row must ask for a destination instead of importing blindly.
@@ -364,6 +451,43 @@ export function needsImportDest(e: Pick<JsonEntry, 'usage' | 'payload'>): boolea
 export function importDestHint(e: Pick<JsonEntry, 'kind' | 'name'>): string | null {
   return e.kind === 'component' ? `src/components/${e.name}` : null;
 }
+
+export type DestinationSource = 'chosen' | 'convention' | 'default';
+
+/** Where an import writes, and how that folder was picked. */
+export type Destination = {
+  /** Project-relative folder the files land in; `.` is the project root. */
+  dest: string;
+  /** The user's own `--to`, the component convention, or the CLI fallback. */
+  source: DestinationSource;
+  /** The folder as a view shows it (`project root` for `.`). */
+  label: string;
+};
+
+/**
+ * The ONE answer to "where does importing this entry land?": the catalog
+ * overview, the import field and the dry-run plan all read this, so a plan
+ * cannot say `src/components/button` while the entry's own page says
+ * `.stack/components/react/button`.
+ *
+ * Precedence: the folder the user picked for this import (`--to`), then the
+ * component convention the import field is prefilled with (a copy entry with
+ * no destination of its own), then the CLI fallback (`defaultImportDest`).
+ * The dry run stays authoritative for what really happens; it just receives
+ * this folder as `--to`, so the two agree by construction.
+ */
+export function resolveDestination(
+  e: Pick<JsonEntry, 'id' | 'kind' | 'name' | 'payload' | 'usage'>,
+  chosen?: string | null,
+): Destination {
+  const picked = (chosen ?? '').trim();
+  if (picked) return { dest: picked, source: 'chosen', label: destLabel(picked) };
+  const convention = needsImportDest(e) ? importDestHint(e) : null;
+  if (convention) return { dest: convention, source: 'convention', label: destLabel(convention) };
+  const fallback = defaultImportDest(e);
+  return { dest: fallback, source: 'default', label: destLabel(fallback) };
+}
+
 
 /** Args for `preset list` / `preset show <name>` / `preset apply <name>`. */
 export function presetListArgs(): string[] {
@@ -767,10 +891,11 @@ export function describeSync(r: SyncJson): OpSection[] {
  */
 export function refusalFiles(stderrText: string): string[] {
   const lines = stderrText.split('\n');
-  const i = lines.findIndex((l) => l.includes('already exist with other content'));
+  // Older CLIs say "with other content"; the rewritten one "with different content", lists
+  // the files indented, then adds an unindented "Nothing was imported…" line that is not a file.
+  const i = lines.findIndex((l) => /already exist with (?:other|different) content/.test(l));
   if (i < 0) return [];
-  return lines
-    .slice(i + 1)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const after = lines.slice(i + 1).filter((l) => l.trim());
+  const indented = after.length > 0 && /^\s/.test(after[0]);
+  return (indented ? after.slice(0, after.findIndex((l) => !/^\s/.test(l)) < 0 ? after.length : after.findIndex((l) => !/^\s/.test(l))) : after).map((l) => l.trim());
 }

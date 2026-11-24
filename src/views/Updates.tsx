@@ -6,20 +6,25 @@
 // re-runs the failed step. A newer build found by the startup check
 // (store.appUpdate) offers install without a click. About the app, not
 // the project — hence the footer.
-import { Match, Switch, createSignal, onCleanup } from 'solid-js';
+import { Match, Show, Switch, createSignal, onCleanup } from 'solid-js';
+import { Icon } from '../icons';
+import { Button } from '../ui';
+import { LABEL } from '../vocab';
 import { errText } from '../bridge';
+import { humanizeCliError, oneSentence } from '../humanize';
 import { appUpdate, setAppUpdate } from '../store';
+import { useAction } from '../actions';
+import { pushToast } from '../toast';
 import {
   checkForUpdate,
   downloadAndInstallUpdate,
   formatUpdateProgress,
   relaunchApp,
-  shortenError,
   type Update,
   type UpdateProgress,
 } from '../updater';
 
-export function Updates() {
+export function Updates(props: { version?: string | null; tip?: string }) {
   const [checking, setChecking] = createSignal(false);
   const [installing, setInstalling] = createSignal(false);
   const [update, setUpdate] = createSignal<Update | null>(null);
@@ -28,6 +33,9 @@ export function Updates() {
   const [fresh, setFresh] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [failedOp, setFailedOp] = createSignal<'check' | 'install' | 'relaunch'>('check');
+
+  // Palette: the same check the footer link runs.
+  useAction('check-updates', { run: () => void check(), reason: () => (busy() ? 'Already checking' : null) });
 
   // Version on offer: a manual check's handle, else the startup check's.
   const offered = () => update()?.version ?? appUpdate();
@@ -54,6 +62,11 @@ export function Updates() {
     try {
       const u = await checkForUpdate();
       setUpdate(u);
+      pushToast(
+        u
+          ? { tone: 'info', title: `Version ${u.version} is available`, description: 'Install it from the sidebar footer.' }
+          : { tone: 'success', title: 'You are up to date' },
+      );
       if (!u) {
         // A fresh "nothing" supersedes the startup check's offer, if any.
         setAppUpdate(null);
@@ -62,6 +75,7 @@ export function Updates() {
     } catch (err) {
       setError(errText(err));
       setFailedOp('check');
+      pushToast({ tone: 'error', title: 'Could not check for updates', description: oneSentence(humanizeCliError(errText(err))) });
     } finally {
       setChecking(false);
     }
@@ -113,57 +127,70 @@ export function Updates() {
     else void check();
   }
 
+  const pill = () => (
+    <Show when={props.version}>
+      {(v) => (
+        <span class="footcard__ver" title={props.tip}>
+          v{v()}
+        </span>
+      )}
+    </Show>
+  );
   return (
-    <Switch>
-      <Match when={error()}>
-        {(full) => (
-          <span>
-            <span class="fadein" role="alert" title={full()}>
-              {shortenError(full())}
-            </span>{' '}
-            <button class="btn" onClick={retry}>
-              retry
-            </button>
-          </span>
-        )}
-      </Match>
-      <Match when={installing()}>
-        <span class="fadein">{formatUpdateProgress(progress()) ?? 'installing…'}</span>
-      </Match>
-      <Match when={installed()}>
-        <button
-          class="btn fadein"
-          title={offered() ? `relaunch to use ${offered()}` : 'relaunch to use the installed update'}
-          onClick={() => void relaunch()}
-        >
-          relaunch
-        </button>
-      </Match>
-      <Match when={checking()}>
-        <span class="fadein">checking…</span>
-      </Match>
-      <Match when={fresh()}>
-        <span class="fadein">up to date</span>
-      </Match>
-      <Match when={offered()}>
-        {(v) => (
-          <span>
-            <span class="fadein">→ {v()} available</span>{' '}
-            <button
-              class="btn"
-              title={update()?.body ?? 'download and install'}
-              onClick={() => void install()}
+    <>
+      <span class="footcard__status">
+        <Switch>
+          <Match when={error()}>
+            {(full) => (
+              <>
+                <Icon name="alert" size={14} />
+                <span class="fadein" role="alert" title={humanizeCliError(full()).next}>
+                  {humanizeCliError(full()).title}
+                </span>
+                <Button size="sm" onClick={retry}>
+                  Retry
+                </Button>
+              </>
+            )}
+          </Match>
+          <Match when={installing()}>
+            <span class="fadein">{formatUpdateProgress(progress()) ?? 'Installing…'}</span>
+          </Match>
+          <Match when={installed()}>
+            <Button
+              size="sm"
+              variant="obsidian"
+              class="fadein"
+              title={offered() ? `Relaunch to use ${offered()}` : 'Relaunch to use the installed update'}
+              onClick={() => void relaunch()}
             >
-              install
+              Relaunch
+            </Button>
+          </Match>
+          <Match when={checking()}>
+            <Icon name="refresh" size={14} />
+            <span class="fadein">Checking…</span>
+          </Match>
+          <Match when={fresh()}>
+            <Icon name="check" size={14} />
+            <span class="fadein">Up to date</span>
+          </Match>
+          <Match when={offered()}>
+            {(v) => (
+              <Button size="sm" variant="obsidian" title={`Install app version ${v()}${update()?.body ? `: ${update()?.body}` : ''}`} onClick={() => void install()}>
+                App update available
+              </Button>
+            )}
+          </Match>
+          <Match when={true}>
+            <Icon name="check" size={14} />
+            <button class="linklike fadein" title={LABEL.checkAppUpdates} onClick={() => void check()}>
+              App updates
             </button>
-          </span>
-        )}
-      </Match>
-      <Match when={true}>
-        <button class="linklike fadein" onClick={() => void check()}>
-          check for updates
-        </button>
-      </Match>
-    </Switch>
+          </Match>
+        </Switch>
+      </span>
+      {pill()}
+    </>
   );
 }

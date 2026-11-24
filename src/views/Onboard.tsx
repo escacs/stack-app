@@ -1,10 +1,17 @@
 // First-run onboarding: who, then which project. Rendered by App instead of
-// the views until both are set. One question per screen, `>` cursor rows,
-// arrows/j/k + enter + 1-9. Escape on the project screen goes back to who.
+// the views until both are set. One question per screen, highlighted rows,
+// arrows/j/k + enter + 1-9. The remembered worker and project are preselected
+// when a screen is reopened to switch; Escape then cancels (keeps what was
+// set). On a first run Escape on the project screen goes back to who.
 import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { errText, pickFolder, scanProjects, type ScanOut } from '../bridge';
 import { moveSel } from '../onboard';
+import { BrandMark, Icon } from '../icons';
+import { Alert, Button, CliErr, HumanBody, Kbd } from '../ui';
+import { humanizeCliError } from '../humanize';
 import {
+  cancelSwitchProject,
+  cancelSwitchWorker,
   chooseProject,
   chooseWorker,
   config,
@@ -20,19 +27,18 @@ import {
 /** Focus once the element is attached (a ref runs before insertion). */
 const focusSoon = (el: HTMLElement) => queueMicrotask(() => el.focus());
 
-const MARK = [
-  '  ▄██▄',
-  '▄██████▄',
-  '███▄▄▄▀',
-  ' ▀▀▀████',
-  '▀███▄▄▄',
-  '   ▀█▀',
-].join('\n');
-
-function Shell(props: { children: unknown }) {
+/** One first-run question on a centred sheet: brand mark, step, title, lead. */
+function Shell(props: { step: 1 | 2; title: string; lead?: string; children: unknown }) {
   return (
     <div class="onboard">
-      <pre class="art" aria-hidden="true">{MARK}</pre>
+      <div class="onboard__mark">
+        <BrandMark />
+      </div>
+      <p class="onboard__step">Step {props.step} of 2</p>
+      <h1 class="prompt">{props.title}</h1>
+      <Show when={props.lead}>
+        <p class="onboard__lead">{props.lead}</p>
+      </Show>
       {props.children as never}
     </div>
   );
@@ -45,10 +51,13 @@ function Shell(props: { children: unknown }) {
  */
 function PickList(props: {
   label: string;
+  icon?: 'user' | 'folder';
   items: () => string[];
   pick: (i: number) => void;
+  /** Row to start on (the remembered answer when switching). */
+  initial?: () => number;
 }) {
-  const [sel, setSel] = createSignal(0);
+  const [sel, setSel] = createSignal(Math.max(0, props.initial?.() ?? 0));
   const onKey = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return;
     const len = props.items().length;
@@ -87,9 +96,13 @@ function PickList(props: {
             onClick={() => props.pick(i())}
             onMouseEnter={() => setSel(i())}
           >
-            <span class="cur-mark" aria-hidden="true">&gt;</span>
-            <span class="dimtxt">{i() + 1}</span>
+            <span class="prow__icon" aria-hidden="true">
+              <Icon name={props.icon ?? 'user'} size={15} />
+            </span>
             <span class="nm">{name}</span>
+            <Show when={i() < 9}>
+              <Kbd>{String(i() + 1)}</Kbd>
+            </Show>
           </div>
         )}
       </For>
@@ -103,36 +116,52 @@ export function WhoScreen() {
     const w = workers()[i];
     if (w) void chooseWorker(w.name);
   };
+  // Escape cancels a switch (the current worker stays); nothing to cancel on a first run.
+  const onEscape = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && cancelSwitchWorker()) e.preventDefault();
+  };
+  onMount(() => addEventListener('keydown', onEscape));
+  onCleanup(() => removeEventListener('keydown', onEscape));
 
   return (
-    <Shell>
-      <h1 class="prompt">who?</h1>
+    <Shell step={1} title="Who is working?" lead="Pick the worker profile this machine uses. Its skills and style are imported into your projects.">
       <Switch>
         <Match when={!workersLoaded()}>
-          <p class="empty">(._.) asking the stack…</p>
+          <p class="empty">Asking the stack…</p>
         </Match>
         <Match when={workersError()}>
-          <p class="conflict" role="alert">{workersError()}</p>
+          <Alert
+            tone="error"
+            icon="alert"
+            role="alert"
+            actions={
+              <Button size="sm" ref={focusSoon} onClick={() => void refreshWorkers()}>
+                Retry
+              </Button>
+            }
+          >
+            <HumanBody human={humanizeCliError(workersError() ?? '')} />
+          </Alert>
           <p>
-            <button class="btn" ref={focusSoon} onClick={() => void refreshWorkers()}>
-              retry
-            </button>{' '}
             <button class="linklike" onClick={() => skipWorker()}>
               continue without one
             </button>
           </p>
         </Match>
         <Match when={names().length === 0}>
-          <p class="empty">(._.) none</p>
+          <p class="empty">No workers in this stack.</p>
           <p>
-            <button class="btn" ref={focusSoon} onClick={() => skipWorker()}>
-              continue without one
-            </button>
+            <Button ref={focusSoon} onClick={() => skipWorker()}>
+              Continue without one
+            </Button>
           </p>
         </Match>
         <Match when={true}>
-          <PickList label="workers" items={names} pick={pick} />
-          <p class="hint">↑↓ enter</p>
+          <PickList label="workers" items={names} pick={pick} initial={() => names().indexOf(config()?.worker ?? '')} />
+          <p class="hint">
+            <Kbd>↑</Kbd> <Kbd>↓</Kbd> move · <Kbd>Enter</Kbd> choose · <Kbd>1</Kbd>–<Kbd>9</Kbd> jump
+            <Show when={config()?.worker}> · <Kbd>Esc</Kbd> keep {config()?.worker}</Show>
+          </p>
         </Match>
       </Switch>
     </Shell>
@@ -186,48 +215,55 @@ export function ProjectScreen() {
     }
   }
 
-  // Escape anywhere on this screen goes back to who.
+  // Escape cancels a project switch (the open project stays); on a first
+  // run it goes back to who.
   const onEscape = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') void switchWorker();
+    if (e.key !== 'Escape') return;
+    if (!cancelSwitchProject()) switchWorker();
   };
   onMount(() => addEventListener('keydown', onEscape));
   onCleanup(() => removeEventListener('keydown', onEscape));
 
   return (
-    <Shell>
-      <h1 class="prompt">project</h1>
+    <Shell step={2} title="Choose a project" lead="The folder stack imports into. Recent projects are one key away.">
       <Show when={notice()}>
-        <p class="conflict" role="alert">{notice()}</p>
+        <CliErr text={notice() ?? ''} />
       </Show>
       <p>
-        <button
-          class="btn primary"
+        <Button
+          variant="obsidian"
           ref={(el) => {
             if (recentPaths().length === 0) focusSoon(el);
           }}
           onClick={() => void browse()}
         >
-          browse folder
-        </button>
+          <Icon name="folder" size={14} /> Browse folder
+        </Button>{' '}
+        <Button disabled={scanning()} onClick={() => void scan()}>
+          <Icon name="search" size={14} /> {scanning() ? 'Scanning…' : 'Scan for projects'}
+        </Button>
       </p>
       <Show when={recentPaths().length > 0}>
-        <h2>recent</h2>
-        <PickList label="recent projects" items={recentPaths} pick={pickRecent} />
-        <p class="hint">↑↓ enter</p>
+        <h2>Recent</h2>
+        <PickList
+          label="recent projects"
+          icon="folder"
+          items={recentPaths}
+          pick={pickRecent}
+          initial={() => recentPaths().indexOf(config()?.project ?? '')}
+        />
+        <p class="hint">
+          <Kbd>↑</Kbd> <Kbd>↓</Kbd> move · <Kbd>Enter</Kbd> open · <Kbd>Esc</Kbd> {config()?.project ? 'cancel' : 'back'}
+        </p>
       </Show>
-      <p>
-        <button class="btn" disabled={scanning()} onClick={() => void scan()}>
-          {scanning() ? 'scanning' : 'scan'}
-        </button>
-      </p>
       <Show when={scanRes()}>
         {(s) => (
-          <Show when={s().repos.length > 0} fallback={<p class="empty">(._.) none</p>}>
+          <Show when={s().repos.length > 0} fallback={<p class="empty">No projects found.</p>}>
             <div class="rows">
               <For each={s().repos}>
                 {(r) => (
                   <div class="row pick">
-                    <button class="btn" onClick={() => void chooseProject(r.path)}>open</button>
+                    <Button size="sm" onClick={() => void chooseProject(r.path)}>Open</Button>
                     <span class="nm" title={r.path}>{r.name}</span>
                     <span class="lead" aria-hidden="true" />
                     <span class="dimtxt">
@@ -241,9 +277,18 @@ export function ProjectScreen() {
         )}
       </Show>
       <p class="dimtxt">
-        <button class="linklike" onClick={() => void switchWorker()}>
-          ‹ {workerName() ?? 'who'}
-        </button>
+        <Show
+          when={config()?.project}
+          fallback={
+            <button class="linklike" onClick={() => switchWorker()}>
+              ‹ Back to {workerName() ?? 'who'}
+            </button>
+          }
+        >
+          <button class="linklike" onClick={() => cancelSwitchProject()}>
+            ‹ Cancel, stay on {(config()?.project ?? '').split(/[\\/]+/).filter(Boolean).pop()}
+          </button>
+        </Show>
       </p>
     </Shell>
   );

@@ -1,0 +1,128 @@
+/* stack-alabaster badge: tactile Mac Alabaster micro-chip for status, target
+   and count labels. Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-chip);
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+
+/* Sizes. */
+
+.sa-badge--xs {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
+.sa-badge--sm {
+  padding: calc(var(--space-1) / 2) var(--space-2);
+}
+
+/* Tabular mono modifier. */
+
+.sa-badge--mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tones: tactile micro-chips. Each carries a top specular highlight, a crisp
+   0.5px semantic hairline ring and a faint contact shadow over a restrained
+   container tint. No decorative status dots. */
+
+.sa-badge--neutral {
+  background-color: color-mix(in srgb, var(--surface-dim) 55%, var(--surface-low));
+  color: var(--on-surface-variant);
+  box-shadow:
+    inset 0 1px 1px rgb(var(--shadow-rgb) / 0.05),
+    inset 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.10),
+    0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.7);
+}
+
+.sa-badge--info {
+  background-color: color-mix(in srgb, var(--info-container) 62%, var(--surface));
+  color: var(--on-info-container);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.65),
+    inset 0 0 0 0.5px rgb(var(--info-rgb) / 0.22),
+    0 1px 1px rgb(var(--shadow-rgb) / 0.04);
+}
+
+.sa-badge--success {
+  background-color: color-mix(in srgb, var(--success-container) 62%, var(--surface));
+  color: var(--on-success-container);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.65),
+    inset 0 0 0 0.5px rgb(var(--success-rgb) / 0.22),
+    0 1px 1px rgb(var(--shadow-rgb) / 0.04);
+}
+
+.sa-badge--warning {
+  background-color: color-mix(in srgb, var(--warning-container) 62%, var(--surface));
+  color: var(--on-warning-container);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.65),
+    inset 0 0 0 0.5px rgb(var(--warning-rgb) / 0.22),
+    0 1px 1px rgb(var(--shadow-rgb) / 0.04);
+}
+
+.sa-badge--error {
+  background-color: color-mix(in srgb, var(--error-container) 62%, var(--surface));
+  color: var(--on-error-container);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.65),
+    inset 0 0 0 0.5px rgb(var(--error-rgb) / 0.22),
+    0 1px 1px rgb(var(--shadow-rgb) / 0.04);
+}
+
+/* Obsidian Ink chip: the single heavy tone. */
+
+.sa-badge--primary {
+  background: var(--stack-alabaster-obsidian-bg, var(--primary));
+  color: var(--on-primary);
+  box-shadow: var(--stack-alabaster-obsidian-shadow);
+}
+
+/* Raised: crisp white-to-alabaster pill (declared last so it wins over tone). */
+
+.sa-badge--variant-raised {
+  background: var(--stack-alabaster-raised-bg, var(--surface));
+  color: var(--on-surface);
+  box-shadow: var(
+    --stack-alabaster-selected-pill-shadow,
+    var(--elevation-1)
+  );
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-chip);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-badge {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-badge {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-badge,
+  .sa-badge--primary,
+  .sa-badge--variant-raised {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+}

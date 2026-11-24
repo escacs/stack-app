@@ -1,0 +1,46 @@
+{
+  "command": "status",
+  "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+  "rows": [
+    {
+      "id": "skills/agent-chain",
+      "path": ".agents/skills/agent-chain",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    },
+    {
+      "id": "skills/agent-lanes",
+      "path": ".agents/skills/agent-lanes",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    },
+    {
+      "id": "skills/coss",
+      "path": ".agents/skills/coss",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    },
+    {
+      "id": "skills/create-agents-md",
+      "path": ".agents/skills/create-agents-md",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    }
+  ]
+}

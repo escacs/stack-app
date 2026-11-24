@@ -1,16 +1,17 @@
-// Tests for the live parse.ts helpers (kinds, manifests, row state) plus
-// pins on the superseded text parsers' documented formats.
+// Tests for the live parse.ts helpers (kinds, manifests, row state).
 import { describe, expect, it } from 'vitest';
 import {
   KINDS,
   countUpdates,
+  editedOf,
+  hasMissing,
+  rowFacts,
+  rowWord,
   kindOf,
   manifestList,
   manifestName,
   parseList,
-  parseOpLog,
   parseShow,
-  parseStatus,
   pluralOf,
   rowState,
   type StatusRow,
@@ -58,6 +59,38 @@ describe('rowState', () => {
   });
 });
 
+describe('missing files', () => {
+  const row = (o: object): StatusRow => ({ id: 'a', commit: 'c', path: 'p', local: [], upstreamCount: null, gone: false, ...o });
+  it('a deleted file is missing, not edited', () => {
+    const r = row({ local: ['SKILL.md'], missing: ['SKILL.md'] });
+    expect(rowState(r)).toBe('missing');
+    expect(editedOf(r)).toEqual([]);
+    expect(rowFacts(r)).toEqual(['missing']);
+  });
+  it('a row can be missing, updated and edited at once; the chip shows missing', () => {
+    const r = row({ local: ['a', 'b'], missing: ['a'], upstreamCount: 2 });
+    expect(rowState(r)).toBe('missing');
+    expect(rowFacts(r)).toEqual(['missing', 'update', 'edited']);
+    expect(editedOf(r)).toEqual(['b']);
+  });
+  it('a gone row is not also missing', () => {
+    expect(rowFacts(row({ gone: true, missing: ['a'], local: ['a'] }))).toEqual(['gone']);
+  });
+  it('hasMissing is true only when some row has missing files', () => {
+    expect(hasMissing([])).toBe(false);
+    expect(hasMissing([row({ local: ['f'] }), row({ upstreamCount: 1 })])).toBe(false);
+    expect(hasMissing([row({ local: ['f'], missing: [] }), row({ local: ['g'], missing: ['g'] })])).toBe(true);
+  });
+  it('countUpdates still counts an updated row that is also missing files', () => {
+    expect(countUpdates([row({ upstreamCount: 1, missing: ['x'], local: ['x'] })])).toBe(1);
+  });
+  it('words come from the shared vocabulary', () => {
+    expect(rowWord('imported')).toBe('Up to date');
+    expect(rowWord('missing')).toBe('Missing files');
+    expect(rowWord('update')).toBe('Update available');
+  });
+});
+
 describe('superseded text parsers (documented formats)', () => {
   it('parseList reads `- id [usage(, status)]: summary`', () => {
     const rows = parseList('- skills/a [link]: Does a.\n- skills/b [link, experimental]: Does b.\nNo matching entries.');
@@ -65,18 +98,6 @@ describe('superseded text parsers (documented formats)', () => {
       { id: 'skills/a', kind: 'skill', name: 'a', usage: 'link', status: null, summary: 'Does a.' },
       { id: 'skills/b', kind: 'skill', name: 'b', usage: 'link', status: 'experimental', summary: 'Does b.' },
     ]);
-  });
-
-  it('parseStatus reads the lock table with bits', () => {
-    const st = parseStatus(
-      'stack at b51359b\n  skills/a @abc1234 -> .agents/skills/a  (update: 2 files; edited here: SKILL.md)\n* skills/b @abc1234 -> .agents/skills/b  (removed from stack)',
-    );
-    expect(st.commit).toBe('b51359b');
-    expect(st.rows).toEqual([
-      { id: 'skills/a', commit: 'abc1234', path: '.agents/skills/a', local: ['SKILL.md'], upstreamCount: 2, gone: false },
-      { id: 'skills/b', commit: 'abc1234', path: '.agents/skills/b', local: [], upstreamCount: null, gone: true },
-    ]);
-    expect(parseStatus('No stack imports here (no stack.toml).')).toEqual({ commit: null, rows: [] });
   });
 
   it('parseShow keeps the doc tail past nested ## headings', () => {
@@ -88,13 +109,5 @@ describe('superseded text parsers (documented formats)', () => {
     expect(doc.docPath).toBe('SKILL.md');
     expect(doc.docBody).toContain('## Notes');
     expect(doc.docBody).toContain('tail');
-  });
-
-  it('parseOpLog tags op lines and keeps bare lines', () => {
-    expect(parseOpLog('import  a -> .stack/a\nCONFLICT .stack/a/f (1 conflict)\nbare line')).toEqual([
-      { tag: 'import', text: 'a -> .stack/a' },
-      { tag: 'CONFLICT', text: '.stack/a/f (1 conflict)' },
-      { tag: '', text: 'bare line' },
-    ]);
   });
 });

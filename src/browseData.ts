@@ -12,9 +12,31 @@ import type { JsonEntry } from './json';
 export type Route =
   | { kind: 'home' }
   | { kind: 'all' }
-  | { kind: 'kind'; kindSingular: string }
+  | { kind: 'presets' }
+  | { kind: 'kind'; kindSingular: string; library?: string }
   | { kind: 'entry'; id: string; file: string | null }
   | { kind: 'missing' };
+
+/**
+ * A library folder inside the components kind is routed as `components/@base`.
+ * Entry ids never carry an `@` segment, so the form cannot collide with
+ * `components/<library>/<name>`.
+ */
+export const LIBRARY_MARK = '@';
+
+/** The route segment naming a component library. */
+export const librarySeg = (name: string): string => `${LIBRARY_MARK}${name}`;
+
+/**
+ * The library folder a component lives in: its `library.name`, else the second
+ * id segment of `components/<library>/<name>`. Null for anything else.
+ */
+export function libraryOf(e: Pick<JsonEntry, 'id' | 'kind' | 'library'>): string | null {
+  if (e.kind !== 'component') return null;
+  if (e.library?.name) return e.library.name;
+  const segs = e.id.split('/');
+  return segs.length >= 3 && segs[1] ? segs[1] : null;
+}
 
 /** Resolve browse sub-segments: longest entry-id prefix wins (web parse). */
 export function resolveRoute(segs: string[], entries: JsonEntry[]): Route {
@@ -27,8 +49,15 @@ export function resolveRoute(segs: string[], entries: JsonEntry[]): Route {
       return { kind: 'entry', id, file: tail || null };
     }
   }
+  if (rest.length === 2 && rest[0] === pluralOf('component') && rest[1].startsWith(LIBRARY_MARK) && rest[1].length > 1) {
+    const library = rest[1].slice(1);
+    // Before the catalog loads nothing can be checked; afterwards an unknown library is a stale link.
+    if (!entries.length || entries.some((e) => libraryOf(e) === library)) return { kind: 'kind', kindSingular: 'component', library };
+    return { kind: 'missing' };
+  }
   if (rest.length === 1) {
     if (rest[0] === 'all') return { kind: 'all' };
+    if (rest[0] === 'presets') return { kind: 'presets' };
     const k = KINDS.find((x) => x === rest[0] || pluralOf(x) === rest[0]);
     if (k) return { kind: 'kind', kindSingular: k };
   }
@@ -38,12 +67,17 @@ export function resolveRoute(segs: string[], entries: JsonEntry[]): Route {
 /** Structural equality, so a memo keeps its identity when the route is unchanged. */
 export function sameRoute(a: Route, b: Route): boolean {
   if (a.kind !== b.kind) return false;
-  if (a.kind === 'kind') return a.kindSingular === (b as typeof a).kindSingular;
+  if (a.kind === 'kind') return a.kindSingular === (b as typeof a).kindSingular && a.library === (b as typeof a).library;
   if (a.kind === 'entry') {
     const o = b as typeof a;
     return a.id === o.id && a.file === o.file;
   }
   return true;
+}
+
+/** One level up from a library folder (the components list); null where there is no folder to leave. */
+export function upRoute(r: Route): Route | null {
+  return r.kind === 'kind' && r.library ? { kind: 'kind', kindSingular: r.kindSingular } : null;
 }
 
 export type CrumbTarget = { to: 'home' } | { to: 'kind'; kindSingular: string } | { to: 'entry'; id: string };
@@ -66,6 +100,10 @@ export function crumbParts(r: Route, searching: boolean): CrumbPart[] {
   const home: CrumbPart = { label: CATALOG_NAME, target: searching || r.kind !== 'home' ? { to: 'home' } : null };
   if (searching || r.kind === 'home') return [home];
   if (r.kind === 'all') return [home, { label: 'all', target: null }];
+  if (r.kind === 'presets') return [home, { label: 'presets', target: null }];
+  if (r.kind === 'kind' && r.library) {
+    return [home, { label: pluralOf(r.kindSingular), target: { to: 'kind', kindSingular: r.kindSingular } }, { label: r.library, target: null }];
+  }
   if (r.kind === 'kind') return [home, { label: pluralOf(r.kindSingular), target: null }];
   if (r.kind === 'entry') {
     const kind = kindOf(r.id);
@@ -212,39 +250,6 @@ export function createFetchCache<V>(limit: number) {
   };
 }
 
-let watcher: IntersectionObserver | undefined;
-const watched = new Map<Element, () => void>();
-
-/**
- * Calls `cb` once, when `el` first comes within 200px of the viewport. One
- * shared observer serves every row. Returns a stop function for cleanup.
- */
-export function whenVisible(el: Element, cb: () => void): () => void {
-  if (typeof IntersectionObserver === 'undefined') {
-    cb();
-    return () => {};
-  }
-  watcher ??= new IntersectionObserver(
-    (entries) => {
-      for (const en of entries) {
-        if (!en.isIntersecting) continue;
-        const fn = watched.get(en.target);
-        if (!fn) continue;
-        watched.delete(en.target);
-        watcher?.unobserve(en.target);
-        fn();
-      }
-    },
-    { rootMargin: '200px' },
-  );
-  watched.set(el, cb);
-  watcher.observe(el);
-  return () => {
-    watched.delete(el);
-    watcher?.unobserve(el);
-  };
-}
-
 /** Module-wide preview cache: data URLs (or null when the file has no image bytes). */
 export const previewCache = createFetchCache<string | null>(3);
 
@@ -290,6 +295,56 @@ export function applyRange(prev: Set<string>, range: string[], additive: boolean
   return next;
 }
 
+export type SelectMods = { shift: boolean; ctrl: boolean };
+export type SelectState = { selected: Set<string>; anchor: string | null };
+
+/**
+ * Select by row, the way file lists and mail lists do. `order` is the list's
+ * row keys in view order; `idsOf` maps a row to the ids it stands for (an
+ * entry is itself, a folder is its pickable members, an unpickable row is
+ * nothing). `selected` holds ids; `anchor` is a row key.
+ *  - plain: select only this row (replace). Arrow keys use it too, so the
+ *    selection follows the cursor like Finder;
+ *  - Ctrl/Cmd: toggle this row, keep the rest; it becomes the anchor;
+ *  - Shift: the inclusive range anchor..row replaces the selection (the
+ *    cursor row is the anchor when there is none); the anchor stays put;
+ *  - Ctrl+Shift: that range is added to the selection.
+ */
+export function selectClick(
+  prev: SelectState,
+  order: readonly string[],
+  cursor: string | null,
+  key: string,
+  mods: SelectMods,
+  idsOf: (key: string) => string[] = (k) => [k],
+): SelectState {
+  if (!order.includes(key)) return prev;
+  if (mods.shift) {
+    const from = prev.anchor !== null && order.includes(prev.anchor) ? prev.anchor : cursor !== null && order.includes(cursor) ? cursor : key;
+    const range = rangeIds([...order], from, key).flatMap(idsOf);
+    return { selected: applyRange(prev.selected, range, mods.ctrl), anchor: from };
+  }
+  const own = idsOf(key);
+  if (mods.ctrl) {
+    const next = new Set(prev.selected);
+    const on = own.length > 0 && own.every((id) => next.has(id));
+    for (const id of own) {
+      if (on) next.delete(id);
+      else next.add(id);
+    }
+    return { selected: next, anchor: key };
+  }
+  return { selected: new Set(own), anchor: key };
+}
+
+/** Keep only the ids still listed (a sort, chip or refresh dropped the rest). Same set back when nothing drops. */
+export function pruneSelection(selected: Set<string>, listed: Iterable<string>): Set<string> {
+  const keep = new Set(listed);
+  let drop = false;
+  for (const id of selected) if (!keep.has(id)) drop = true;
+  return drop ? new Set([...selected].filter((id) => keep.has(id))) : selected;
+}
+
 /**
  * Ids the `a` key selects: every listed row not imported yet, in list
  * order. Not-committed rows stay selectable: the batch plan skips them with
@@ -297,22 +352,6 @@ export function applyRange(prev: Set<string>, range: string[], additive: boolean
  */
 export function notImportedIds(entries: Pick<JsonEntry, 'id'>[], imported: Set<string>): string[] {
   return entries.filter((e) => !imported.has(e.id)).map((e) => e.id);
-}
-
-/**
- * Minimum pointer travel (px) before a gutter hover extends the selection.
- * Clicking a gutter opens the selection bar above the list, which shifts
- * every row under the stationary cursor: without a threshold the synthetic
- * enter on a neighbouring gutter drag-extends, and one click selects three
- * rows. Rows are a full line tall, so 5px never blocks a real drag.
- */
-export const GUTTER_DRAG_PX = 5;
-
-/** True once the pointer moved at least the drag threshold from its press point. */
-export function dragPassed(x0: number, y0: number, x1: number, y1: number, px: number = GUTTER_DRAG_PX): boolean {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  return dx * dx + dy * dy >= px * px;
 }
 
 /** The focused-element facts the confirm focus rule needs (structural, so unit-testable). */

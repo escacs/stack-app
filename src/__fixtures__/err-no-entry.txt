@@ -1,0 +1,1 @@
+There is no entry "nope/x". Run `stack search <word>` to find the right id, or `stack list` to see everything.

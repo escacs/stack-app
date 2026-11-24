@@ -1,0 +1,217 @@
+/* Stack Alabaster (A2 Mac Alabaster & Obsidian Ink) design tokens.
+   Grounded in concept15_a2_project_usability.html and concept16_a2_browse_t3.html
+   (approved A2 spec for escacs/stack-app, 2026-11-18).
+   Contract roles marked "derived" were extrapolated from the A2 spec. */
+
+:root {
+  color-scheme: light;
+
+  /* Brand */
+  --primary:                    #161618; /* Obsidian Ink primary CTA and active ink */
+  --primary-rgb:                22 22 24;
+  --on-primary:                 #ffffff;
+  --on-primary-rgb:             255 255 255;
+  --primary-container:          #e1e1e5; /* derived: recessed alabaster well */
+  --primary-container-rgb:      225 225 229;
+  --on-primary-container:       #161618; /* derived */
+  --on-primary-container-rgb:   22 22 24;
+  --secondary:                  #55555d; /* derived: nudged from #5b5b63 for >= 4.5:1 on white/alabaster */
+  --secondary-rgb:              85 85 93;
+  --on-secondary:               #ffffff; /* derived */
+  --on-secondary-rgb:           255 255 255;
+  --secondary-container:        #f2f2f5; /* Raised Mac button base fill */
+  --secondary-container-rgb:    242 242 245;
+  --on-secondary-container:     #161618;
+  --on-secondary-container-rgb: 22 22 24;
+  --tertiary:                   #1e62e0; /* Mac Target Blue (active target worktree accent) */
+  --tertiary-rgb:               30 98 224;
+  --on-tertiary:                #ffffff; /* derived */
+  --on-tertiary-rgb:            255 255 255;
+  --tertiary-container:         #e6eefc; /* derived: flattened rgba(30, 98, 224, 0.10) over #ffffff */
+  --tertiary-container-rgb:     230 238 252;
+  --on-tertiary-container:      #123c8c; /* derived */
+  --on-tertiary-container-rgb:  18 60 140;
+
+  /* Status */
+  --error:                      #b42318;
+  --error-rgb:                  180 35 24;
+  --on-error:                   #ffffff;
+  --on-error-rgb:               255 255 255;
+  --error-container:            #fbe4e2; /* derived */
+  --error-container-rgb:        251 228 226;
+  --on-error-container:         #69150e; /* derived */
+  --on-error-container-rgb:     105 21 14;
+  --success:                    #187243;
+  --success-rgb:                24 114 67;
+  --on-success:                 #ffffff; /* derived */
+  --on-success-rgb:             255 255 255;
+  --success-container:          #e0f2e8; /* derived: flattened rgba(24, 114, 67, 0.08) + tint */
+  --success-container-rgb:      224 242 232;
+  --on-success-container:       #0e4729; /* derived */
+  --on-success-container-rgb:   14 71 41;
+  --warning:                    #b54d15;
+  --warning-rgb:                181 77 21;
+  --warning-text:               #99400e; /* app-added: warning ink for text, >= 4.5:1 on background, wells and white (the fill token is 4.41:1 on the frame) */
+  --on-warning:                 #ffffff; /* derived */
+  --on-warning-rgb:             255 255 255;
+  --warning-container:          #fae8de; /* derived: flattened rgba(181, 77, 21, 0.08) + tint */
+  --warning-container-rgb:      250 232 222;
+  --on-warning-container:       #662808; /* derived */
+  --on-warning-container-rgb:   102 40 8;
+  --info:                       #1e62e0;
+  --info-rgb:                   30 98 224;
+  --on-info:                    #ffffff;
+  --on-info-rgb:                255 255 255;
+  --info-container:             #e6eefc; /* derived */
+  --info-container-rgb:         230 238 252;
+  --on-info-container:          #123c8c; /* derived */
+  --on-info-container-rgb:      18 60 140;
+
+  /* Surfaces and text */
+  --background:                 #ececef; /* Warm-neutral Mac alabaster frame */
+  --background-rgb:             236 236 239;
+  --on-background:              #161618;
+  --on-background-rgb:          22 22 24;
+  --surface:                    #ffffff; /* Main elevated spatial sheet */
+  --surface-rgb:                255 255 255;
+  --surface-dim:                #e1e1e5; /* Recessed well (segmented track, search well) */
+  --surface-dim-rgb:            225 225 229;
+  --surface-lowest:             #ececef; /* Window canvas and titlebar base */
+  --surface-lowest-rgb:         236 236 239;
+  --surface-low:                #f4f4f6; /* Sheet utility/dispatch tray */
+  --surface-low-rgb:            244 244 246;
+  --surface-container:          #ffffff; /* Pure white elevated spatial panels and cards */
+  --surface-container-rgb:      255 255 255;
+  --surface-high:               #ffffff; /* Raised popover/dialog/input base */
+  --surface-high-rgb:           255 255 255;
+  --surface-highest:            #e4e4e8; /* Footer well / active worktree tint */
+  --surface-highest-rgb:        228 228 232;
+  --on-surface:                 #161618;
+  --on-surface-rgb:             22 22 24;
+  --on-surface-variant:         #54545c; /* derived: nudged from #5b5b63 so >= 4.5:1 holds on #e1e1e5 & #e4e4e8 */
+  --on-surface-variant-rgb:     84 84 92;
+  --outline:                    #8c8c94; /* derived: 3:1+ border on white/alabaster */
+  --outline-rgb:                140 140 148;
+  --outline-variant:            #dadae0; /* flattened rgba(22, 22, 24, 0.10) hairline */
+  --outline-variant-rgb:        218 218 224;
+  --inverse-surface:            #161618;
+  --inverse-surface-rgb:        22 22 24;
+  --on-inverse-surface:         #ffffff;
+  --on-inverse-surface-rgb:     255 255 255;
+  --scrim:                      #161618; /* derived */
+  --scrim-rgb:                  22 22 24;
+  --shadow:                     #000000;
+  --shadow-rgb:                 0 0 0;
+
+  /* Shape */
+  --radius-xs:                  4px;  /* kbd keys, tiny badges */
+  --radius-sm:                  7px;  /* segmented items, sub-pills */
+  --radius-md:                  8px;  /* buttons, search well, split pill, nav rows */
+  --radius-lg:                  10px; /* diff card, preview card, footer well */
+  --radius-xl:                  14px; /* main spatial sheet */
+  --radius-full:                9999px;
+  --radius-control:             var(--radius-md);
+  --radius-card:                var(--radius-lg);
+  --radius-panel:               var(--radius-xl);
+  --radius-chip:                var(--radius-sm);
+  --border-width:               1px;
+  --border-width-strong:        1.5px; /* derived */
+
+  /* Spacing and sizing */
+  --space-unit:                 4px;
+  --space-1:                    calc(var(--space-unit) * 1);  /* 4px */
+  --space-2:                    calc(var(--space-unit) * 2);  /* 8px */
+  --space-3:                    calc(var(--space-unit) * 3);  /* 12px */
+  --space-4:                    calc(var(--space-unit) * 4);  /* 16px */
+  --space-5:                    calc(var(--space-unit) * 5);  /* 20px */
+  --space-6:                    calc(var(--space-unit) * 6);  /* 24px */
+  --space-8:                    calc(var(--space-unit) * 8);  /* 32px */
+  --space-10:                   calc(var(--space-unit) * 10); /* 40px */
+  --space-12:                   calc(var(--space-unit) * 12); /* 48px */
+  --space-16:                   calc(var(--space-unit) * 16); /* 64px */
+  --control-height-sm:          28px; /* derived: compact badge/row button */
+  --control-height-md:          32px; /* Mac toolbar buttons, search well, split pill */
+  --control-height-lg:          36px; /* Sidebar source-list rows */
+  --control-padding-x:          12px;
+  --icon-size-sm:               13px;
+  --icon-size-md:               15px;
+  --icon-size-lg:               20px; /* L2 brand mark size in titlebar */
+  --icon-stroke-width:          1.85;
+  --content-max-width:          1280px;
+
+  /* Type */
+  --font-display:               "Plus Jakarta Sans", "Adwaita Sans", system-ui, sans-serif;
+  --font-body:                  "Plus Jakarta Sans", "Adwaita Sans", system-ui, sans-serif;
+  --font-mono:                  "IBM Plex Mono", "Adwaita Mono", ui-monospace, monospace;
+  --font-size-xs:               11.5px; /* numeric counts, kbd, foot version */
+  --font-size-sm:               13px;   /* secondary text, toolbar buttons, tray copy */
+  --font-size-base:             14px;   /* body text */
+  --font-size-md:               15px;   /* doc lead copy */
+  --font-size-lg:               18px;   /* derived */
+  --font-size-xl:               22px;   /* derived */
+  --font-size-2xl:              28px;   /* sheet document title */
+  --font-size-3xl:              32px;   /* derived */
+  --font-size-4xl:              40px;   /* derived */
+  --line-height-tight:          1.15;
+  --line-height-normal:         1.5;
+  --line-height-relaxed:        1.65;
+  --font-weight-regular:        400;
+  --font-weight-medium:         500;
+  --font-weight-semibold:       600;
+  --font-weight-bold:           700;
+  --tracking-tight:             -0.025em;
+  --tracking-normal:            0;
+  --tracking-wide:              0.04em;
+
+  /* Elevation */
+  --elevation-0:                none;
+  --elevation-1:                inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.96), inset 0 -1px 0 rgb(var(--shadow-rgb) / 0.06), 0 1px 2px rgb(var(--shadow-rgb) / 0.07), 0 0 0 1px rgb(var(--shadow-rgb) / 0.11); /* Tactile Mac raised button */
+  --elevation-2:                0 1px 3px rgb(var(--shadow-rgb) / 0.05), 0 12px 32px rgb(var(--shadow-rgb) / 0.05), 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.10); /* Spatial white sheet */
+  --elevation-3:                0 10px 28px rgb(var(--shadow-rgb) / 0.14), 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.12); /* Popover, floating toolbar */ /* Obsidian ink primary CTA */
+  --elevation-4:                0 20px 48px rgb(var(--shadow-rgb) / 0.18), 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.14); /* derived: popover/dialog */
+  --panel-edge:                 inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 1);
+  --blur-glass:                 0px; /* Opaque tactile alabaster surfaces; no frosted blur */
+
+  /* State layers */
+  --state-hover:                0.05;
+  --state-press:                0.08;
+  --state-selected:             0.055;
+  --state-disabled-opacity:     0.42; /* derived */
+  --press-scale:                0.985; /* derived: subtle mechanical click */
+
+  /* Motion */
+  --duration-instant:           60ms;  /* derived */
+  --duration-fast:              120ms; /* derived */
+  --duration-base:              180ms; /* derived */
+  --duration-slow:              280ms; /* derived */
+  --duration-enter:             320ms; /* derived */
+  --ease-standard:              cubic-bezier(0.2, 0, 0, 1); /* derived */
+  --ease-emphasized:            cubic-bezier(0.2, 0, 0, 1); /* derived */
+  --ease-spring:                cubic-bezier(0.25, 1.15, 0.4, 1); /* derived */
+  --ease-spring-soft:           cubic-bezier(0.22, 1, 0.36, 1); /* derived */
+
+  /* Focus and selection */
+  --focus-ring-color:           #1e62e0; /* Mac Target Blue focus ring */
+  --focus-ring-width:           2px;
+  --focus-ring-offset:          2px;
+  --focus-ring:                 var(--focus-ring-width) solid var(--focus-ring-color);
+  --selection-bg:               rgb(30 98 224 / 0.18);
+
+  /* Style-specific A2 Mac tactile gradients and wells (derived from contract tokens) */
+  --stack-alabaster-titlebar-bg: linear-gradient(180deg, color-mix(in srgb, var(--surface) 45%, var(--surface-lowest)) 0%, var(--surface-lowest) 100%);
+  --stack-alabaster-raised-bg:   linear-gradient(180deg, var(--surface) 0%, var(--surface-high) 100%);
+  --stack-alabaster-obsidian-bg: linear-gradient(180deg, color-mix(in srgb, var(--primary) 86%, var(--on-primary)) 0%, var(--primary) 100%);
+  --stack-alabaster-obsidian-shadow: inset 0 1px 0 rgb(var(--on-primary-rgb) / 0.24), inset 0 -1px 0 rgb(var(--shadow-rgb) / 0.55), 0 1px 2px rgb(var(--shadow-rgb) / 0.28), 0 3px 8px rgb(var(--shadow-rgb) / 0.14), 0 0 0 1px rgb(var(--shadow-rgb) / 0.85);
+  --stack-alabaster-traffic-close: #ff5f57;
+  --stack-alabaster-traffic-min:   #febc2e;
+  --stack-alabaster-traffic-max:   #28c840;
+  --stack-alabaster-well-recess: inset 0 1px 2px rgb(var(--shadow-rgb) / 0.08), inset 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.07), 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.85);
+  --stack-alabaster-selected-pill-shadow: inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.96), inset 0 -1px 0 rgb(var(--shadow-rgb) / 0.06), 0 1px 2px rgb(var(--shadow-rgb) / 0.10), 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.08);
+  --stack-alabaster-target-well-bg: rgb(var(--primary-rgb) / var(--state-selected));
+  --stack-alabaster-target-well-shadow: inset 0 1px 1px rgb(var(--shadow-rgb) / 0.05), inset 0 0 0 0.5px rgb(var(--shadow-rgb) / 0.07);
+}
+
+[data-reduce-motion="true"] *, [data-reduce-motion="true"] *::before, [data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

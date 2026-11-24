@@ -1,0 +1,44 @@
+/* Dark-mode corrections for the vendored light-only components (the library draws its edges
+   from on-inverse-surface, which is near-black in dark). App-owned, loaded after tokens-dark.css. */
+:root[data-theme="dark"] {
+  --stack-alabaster-obsidian-bg: linear-gradient(180deg, #ffffff 0%, #e4e4e8 100%);
+  --stack-alabaster-obsidian-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 0 rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(0 0 0 / 0.5);
+  --obsidian-hover: brightness(0.9); --obsidian-press: brightness(0.8);
+  --outline-variant: #45454c; --outline-variant-rgb: 69 69 76;
+}
+:root[data-theme="dark"] .sa-dialog__backdrop { background: radial-gradient(120% 90% at 50% 38%, rgb(0 0 0 / 0.45) 0%, rgb(0 0 0 / 0.6) 100%); }
+:root[data-theme="dark"] .sa-dialog__content { background: var(--surface-high); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.10), 0 2px 4px rgb(0 0 0 / 0.3), 0 24px 64px -12px rgb(0 0 0 / 0.7); }
+:root[data-theme="dark"] .sa-toast { background: var(--surface-high); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.10), 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -8px rgb(0 0 0 / 0.6); }
+:root[data-theme="dark"] .sa-alert { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.3); }
+:root[data-theme="dark"] .sa-kbd { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 1px rgb(0 0 0 / 0.4); }
+:root[data-theme="dark"] .sa-badge--neutral, .sa-badge--info, .sa-badge--success, .sa-badge--warning, .sa-badge--error { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 0.5px rgb(255 255 255 / 0.10); }
+:root[data-theme="dark"] .sa-search-field, .sa-sunken, .sa-well, .sa-segmented-control--track { box-shadow: var(--stack-alabaster-well-recess); }
+:root[data-theme="dark"] .sa-shell__titlebar { box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.06); }
+:root[data-theme="dark"] .sa-shell__traffic-btn, .sa-shell__traffic-btn:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12); }
+:root[data-theme="dark"] .diff__srow[data-kind="yours"] td:nth-child(1), .diff__srow[data-kind="yours"] td:nth-child(2) { background: rgb(var(--warning-rgb) / .12); }
+:root[data-theme="dark"] .diff__srow[data-kind="upstream"] td:nth-child(3), .diff__srow[data-kind="upstream"] td:nth-child(4) { background: rgb(var(--success-rgb) / .12); }
+:root[data-theme="dark"] .diff__srow[data-kind="yours"] td:nth-child(4), .diff__srow[data-kind="upstream"] td:nth-child(2) { background: var(--surface-low); }
+:root[data-theme="dark"] .erow[data-selected] { background: rgb(var(--tertiary-rgb) / .14); }
+:root[data-theme="dark"] .erow:hover:not([data-selected]) { background: rgb(var(--on-surface-rgb) / .07); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --stack-alabaster-obsidian-bg: linear-gradient(180deg, #ffffff 0%, #e4e4e8 100%);
+    --stack-alabaster-obsidian-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 0 rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(0 0 0 / 0.5);
+    --obsidian-hover: brightness(0.9); --obsidian-press: brightness(0.8);
+  --outline-variant: #45454c; --outline-variant-rgb: 69 69 76;
+  }
+  :root:not([data-theme="light"]) .sa-dialog__backdrop { background: radial-gradient(120% 90% at 50% 38%, rgb(0 0 0 / 0.45) 0%, rgb(0 0 0 / 0.6) 100%); }
+  :root:not([data-theme="light"]) .sa-dialog__content { background: var(--surface-high); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.10), 0 2px 4px rgb(0 0 0 / 0.3), 0 24px 64px -12px rgb(0 0 0 / 0.7); }
+  :root:not([data-theme="light"]) .sa-toast { background: var(--surface-high); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.10), 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -8px rgb(0 0 0 / 0.6); }
+  :root:not([data-theme="light"]) .sa-alert { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.3); }
+  :root:not([data-theme="light"]) .sa-kbd { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 1px rgb(0 0 0 / 0.4); }
+  :root:not([data-theme="light"]) .sa-badge--neutral, .sa-badge--info, .sa-badge--success, .sa-badge--warning, .sa-badge--error { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 0.5px rgb(255 255 255 / 0.10); }
+  :root:not([data-theme="light"]) .sa-search-field, .sa-sunken, .sa-well, .sa-segmented-control--track { box-shadow: var(--stack-alabaster-well-recess); }
+  :root:not([data-theme="light"]) .sa-shell__titlebar { box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.06); }
+  :root:not([data-theme="light"]) .sa-shell__traffic-btn, .sa-shell__traffic-btn:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12); }
+  :root:not([data-theme="light"]) .diff__srow[data-kind="yours"] td:nth-child(1), .diff__srow[data-kind="yours"] td:nth-child(2) { background: rgb(var(--warning-rgb) / .12); }
+  :root:not([data-theme="light"]) .diff__srow[data-kind="upstream"] td:nth-child(3), .diff__srow[data-kind="upstream"] td:nth-child(4) { background: rgb(var(--success-rgb) / .12); }
+  :root:not([data-theme="light"]) .diff__srow[data-kind="yours"] td:nth-child(4), .diff__srow[data-kind="upstream"] td:nth-child(2) { background: var(--surface-low); }
+  :root:not([data-theme="light"]) .erow[data-selected] { background: rgb(var(--tertiary-rgb) / .14); }
+  :root:not([data-theme="light"]) .erow:hover:not([data-selected]) { background: rgb(var(--on-surface-rgb) / .07); }
+}

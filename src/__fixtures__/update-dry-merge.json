@@ -1,0 +1,32 @@
+{
+  "command": "update",
+  "dryRun": true,
+  "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+  "updated": [
+    {
+      "id": "skills/agent-chain",
+      "changed": 2,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "outcome": "conflict-markers"
+        },
+        {
+          "path": "references/roles.md",
+          "outcome": "updated"
+        }
+      ]
+    }
+  ],
+  "conflicts": [
+    ".agents/skills/agent-chain/SKILL.md"
+  ],
+  "merged": [
+    ".agents/skills/agent-chain/references/roles.md"
+  ],
+  "kept": [],
+  "skipped": [],
+  "gone": [],
+  "imported": [],
+  "upToDate": false
+}

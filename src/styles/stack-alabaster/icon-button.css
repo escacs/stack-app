@@ -1,0 +1,191 @@
+/* stack-alabaster icon-button: square tactile toolbar action button.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  padding: 0;
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sa-icon-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sa-icon-button__icon svg {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+  flex: none;
+}
+
+/* Sizes. */
+
+.sa-icon-button--sm {
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+}
+
+.sa-icon-button--sm .sa-icon-button__icon svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.sa-icon-button--md {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+}
+
+/* Variants. */
+
+.sa-icon-button--raised {
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  box-shadow: var(--elevation-1);
+}
+
+.sa-icon-button--raised:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  color: var(--on-surface);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-hover) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-hover) * 100%)) 100%
+  );
+}
+
+.sa-icon-button--raised:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  color: var(--on-surface);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-press) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-press) * 100%)) 100%
+  );
+  transform: scale(var(--press-scale));
+}
+
+.sa-icon-button--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.sa-icon-button--ghost:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  color: var(--on-surface);
+  background-color: rgb(var(--on-surface-rgb) / var(--state-hover));
+}
+
+.sa-icon-button--ghost:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  color: var(--on-surface);
+  background-color: rgb(var(--on-surface-rgb) / var(--state-press));
+  transform: scale(var(--press-scale));
+}
+
+/* Active / toggled: recessed Mac Target Blue well (variant="active" or aria-pressed="true"). */
+
+.sa-icon-button--active,
+.sa-icon-button[aria-pressed="true"] {
+  background: var(--stack-alabaster-target-well-bg);
+  color: var(--tertiary);
+  box-shadow:
+    var(--stack-alabaster-target-well-shadow),
+    inset 0 0 0 0.5px rgb(var(--tertiary-rgb) / 0.26);
+}
+
+.sa-icon-button--active:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]),
+.sa-icon-button[aria-pressed="true"]:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  background: color-mix(
+    in srgb,
+    var(--stack-alabaster-target-well-bg),
+    var(--on-surface) calc(var(--state-hover) * 100%)
+  );
+  color: var(--tertiary);
+}
+
+.sa-icon-button--active:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]),
+.sa-icon-button[aria-pressed="true"]:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  background: color-mix(
+    in srgb,
+    var(--stack-alabaster-target-well-bg),
+    var(--on-surface) calc(var(--state-press) * 100%)
+  );
+  color: var(--tertiary);
+  transform: scale(var(--press-scale));
+}
+
+/* States. */
+
+.sa-icon-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sa-icon-button:disabled,
+.sa-icon-button[data-disabled],
+.sa-icon-button[aria-disabled="true"]:not([data-pending]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+.sa-icon-button[data-pending] {
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-icon-button {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-icon-button {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-icon-button {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid ButtonText;
+  }
+
+  .sa-icon-button--ghost {
+    border-color: transparent;
+  }
+
+  .sa-icon-button--active,
+  .sa-icon-button[aria-pressed="true"] {
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+    box-shadow: none;
+  }
+
+  .sa-icon-button:disabled,
+  .sa-icon-button[data-disabled],
+  .sa-icon-button[aria-disabled="true"]:not([data-pending]) {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sa-icon-button:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

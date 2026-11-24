@@ -1,0 +1,136 @@
+{
+  "runs": {
+    "import": {
+      "argv": [
+        "import",
+        "skills/agent-chain",
+        "skills/agent-lanes",
+        "skills/create-agents-md",
+        "skills/coss",
+        "--json"
+      ]
+    },
+    "status-clean": {
+      "argv": [
+        "status",
+        "--json"
+      ]
+    },
+    "status": {
+      "argv": [
+        "status",
+        "--json"
+      ]
+    },
+    "update-dry-merge": {
+      "argv": [
+        "update",
+        "skills/agent-chain",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    "update-dry-keep-take": {
+      "argv": [
+        "update",
+        "skills/agent-chain",
+        "--keep-mine",
+        "SKILL.md",
+        "--take-upstream",
+        "references/roles.md",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    "update-dry-unmatched": {
+      "argv": [
+        "update",
+        "skills/agent-lanes",
+        "--keep-mine",
+        "nope.md",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    "restore-dry": {
+      "argv": [
+        "restore",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    "restore-entry": {
+      "argv": [
+        "restore",
+        "skills/create-agents-md",
+        "--json"
+      ]
+    },
+    "status-after-restore": {
+      "argv": [
+        "status",
+        "--json"
+      ]
+    },
+    "update-keep-take": {
+      "argv": [
+        "update",
+        "skills/agent-chain",
+        "--keep-mine",
+        "SKILL.md",
+        "--take-upstream",
+        "references/roles.md",
+        "--json"
+      ]
+    },
+    "update-all": {
+      "argv": [
+        "update",
+        "--json"
+      ]
+    },
+    "status-after-update": {
+      "argv": [
+        "status",
+        "--json"
+      ]
+    },
+    "err-no-entry": {
+      "argv": [
+        "import",
+        "nope/x"
+      ],
+      "failed": true
+    },
+    "err-collision": {
+      "argv": [
+        "import",
+        "skills/coss",
+        "--to",
+        ".agents/skills/agent-lanes"
+      ]
+    },
+    "err-bad-resolve": {
+      "argv": [
+        "update",
+        "skills/agent-chain",
+        "--resolve",
+        "a=bad"
+      ],
+      "failed": true
+    },
+    "err-not-imported": {
+      "argv": [
+        "restore",
+        "skills/nope"
+      ],
+      "failed": true
+    },
+    "err-already": {
+      "argv": [
+        "import",
+        "skills/coss"
+      ]
+    }
+  }
+}

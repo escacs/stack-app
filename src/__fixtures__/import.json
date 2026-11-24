@@ -1,0 +1,24 @@
+{
+  "command": "import",
+  "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+  "imported": [
+    {
+      "id": "skills/agent-chain",
+      "path": ".agents/skills/agent-chain"
+    },
+    {
+      "id": "skills/agent-lanes",
+      "path": ".agents/skills/agent-lanes"
+    },
+    {
+      "id": "skills/create-agents-md",
+      "path": ".agents/skills/create-agents-md"
+    },
+    {
+      "id": "skills/coss",
+      "path": ".agents/skills/coss"
+    }
+  ],
+  "already": [],
+  "gitignore": "updated"
+}

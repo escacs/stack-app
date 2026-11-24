@@ -1,0 +1,148 @@
+/* stack-alabaster split-pill: shared 32px raised Mac capsule with two
+   independent interactive segments separated by a hairline divider.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-split-pill {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-height-md);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  box-shadow: var(--elevation-1);
+  font-family: var(--font-body);
+}
+
+.sa-split-pill__segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  letter-spacing: var(--tracking-normal);
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sa-split-pill__segment--left {
+  color: var(--on-surface);
+  border-top-left-radius: var(--radius-control);
+  border-bottom-left-radius: var(--radius-control);
+}
+
+.sa-split-pill__segment--right {
+  color: var(--on-surface-variant);
+  border-top-right-radius: var(--radius-control);
+  border-bottom-right-radius: var(--radius-control);
+}
+
+.sa-split-pill__divider {
+  width: var(--border-width);
+  align-self: stretch;
+  background-color: var(--outline-variant);
+  flex: none;
+}
+
+.sa-split-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.sa-split-pill__icon svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+  flex: none;
+}
+
+.sa-split-pill__label {
+  display: inline-block;
+}
+
+/* Interactive states per segment. */
+
+.sa-split-pill__segment:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-hover));
+  color: var(--on-surface);
+}
+
+.sa-split-pill__segment:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-press));
+  color: var(--on-surface);
+}
+
+.sa-split-pill__segment:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  position: relative;
+  z-index: 1;
+}
+
+.sa-split-pill__segment:disabled,
+.sa-split-pill__segment[data-disabled],
+.sa-split-pill__segment[aria-disabled="true"]:not([data-pending]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+.sa-split-pill__segment[data-pending] {
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-split-pill__segment {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-split-pill__segment {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-split-pill {
+    forced-color-adjust: none;
+    background: Canvas;
+    border: var(--border-width) solid ButtonText;
+  }
+
+  .sa-split-pill__divider {
+    background-color: ButtonText;
+  }
+
+  .sa-split-pill__segment {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .sa-split-pill__segment:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]) {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .sa-split-pill__segment:disabled,
+  .sa-split-pill__segment[data-disabled],
+  .sa-split-pill__segment[aria-disabled="true"]:not([data-pending]) {
+    color: GrayText;
+  }
+
+  .sa-split-pill__segment:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "command": "update",
+  "dryRun": true,
+  "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+  "updated": [
+    {
+      "id": "skills/agent-lanes",
+      "changed": 1,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "outcome": "updated"
+        }
+      ]
+    }
+  ],
+  "conflicts": [],
+  "merged": [],
+  "kept": [],
+  "skipped": [],
+  "gone": [],
+  "imported": [],
+  "unmatched": [
+    "nope.md"
+  ],
+  "upToDate": false
+}

@@ -1,0 +1,46 @@
+/* stack-alabaster kbd: tactile miniature Mac keycap shortcut glyph.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: calc(var(--space-4) + var(--space-1));
+  padding: calc(var(--space-1) * 0.75) calc(var(--space-2) * 0.75);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  color: var(--on-surface-variant);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.96),
+    0 1px 1px rgb(var(--shadow-rgb) / 0.08),
+    0 0 0 0.5px rgb(var(--shadow-rgb) / 0.14);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-kbd {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-kbd {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-kbd {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid ButtonText;
+  }
+}

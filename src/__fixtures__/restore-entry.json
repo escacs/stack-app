@@ -1,0 +1,10 @@
+{
+  "command": "restore",
+  "restored": [
+    ".agents/skills/create-agents-md/references/template.md"
+  ],
+  "kept": [],
+  "skipped": [],
+  "pruned": [],
+  "worker": null
+}

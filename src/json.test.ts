@@ -37,12 +37,14 @@ import {
   quickImportError,
   quickImportLine,
   refusalFiles,
+  resolveDestination,
   searchArgs,
   showFileArgs,
   toShowDoc,
   toShowFile,
   visiblePresets,
   toStatusRows,
+  withMissing,
   type ImportJson,
   type InitJson,
   type JsonEntry,
@@ -131,7 +133,7 @@ describe('toStatusRows', () => {
     });
   });
 
-  it('maps upstream arrays to counts and keeps commit/flags', () => {
+  it('maps upstream arrays to counts (and keeps the names) and keeps commit/flags', () => {
     const s: StatusJson = {
       command: 'status',
       commit: 'abc123',
@@ -143,10 +145,54 @@ describe('toStatusRows', () => {
     expect(toStatusRows(s)).toEqual({
       commit: 'abc123',
       rows: [
-        { id: 'a', commit: 'abc123', path: '.stack/a', local: ['f'], upstreamCount: 2, gone: false },
-        { id: 'b', commit: 'abc123', path: '.stack/b', local: [], upstreamCount: 0, gone: true },
+        { id: 'a', commit: 'abc123', path: '.stack/a', local: ['f'], upstreamCount: 2, upstream: ['f', 'g'], gone: false },
+        { id: 'b', commit: 'abc123', path: '.stack/b', local: [], upstreamCount: 0, upstream: [], gone: true },
       ],
     });
+  });
+});
+
+describe('withMissing', () => {
+  const row = (o: object) => ({ id: 'a', commit: 'c', path: '.stack/a', local: [] as string[], upstreamCount: 0, gone: false, ...o });
+  it('marks local files that are gone from the project as missing', async () => {
+    const seen: string[] = [];
+    const out = await withMissing([row({ local: ['SKILL.md', 'b.md'] })], async (p) => {
+      seen.push(p);
+      return p.endsWith('b.md');
+    });
+    expect(seen).toEqual(['.stack/a/SKILL.md', '.stack/a/b.md']);
+    expect(out[0].missing).toEqual(['SKILL.md']);
+  });
+  it('leaves rows with nothing local, gone rows and rows that already report missing alone', async () => {
+    const never = async () => {
+      throw new Error('no lookup expected');
+    };
+    const rows = [row({}), row({ gone: true, local: ['x'] }), row({ local: ['y'], missing: [] })];
+    expect(await withMissing(rows, never)).toEqual(rows);
+  });
+  it('a failed lookup counts as present, and a root import has no path prefix', async () => {
+    let asked = '';
+    const out = await withMissing([row({ path: '.', local: ['f'] })], async (p) => {
+      asked = p;
+      throw new Error('denied');
+    });
+    expect(asked).toBe('f');
+    expect(out[0].missing).toEqual([]);
+  });
+});
+
+describe('toStatusRows missing', () => {
+  it('carries a missing list through and omits it when the CLI sends none', () => {
+    const r = toStatusRows({
+      command: 'status',
+      commit: 'c',
+      rows: [
+        { id: 'a', path: 'p', commit: 'c', local: ['f'], upstream: [], missing: ['f'], gone: false },
+        { id: 'b', path: 'q', commit: 'c', local: [], upstream: [], gone: false },
+      ],
+    }).rows;
+    expect(r[0].missing).toEqual(['f']);
+    expect('missing' in r[1]).toBe(false);
   });
 });
 
@@ -273,6 +319,37 @@ describe('quick import destinations', () => {
   it('prefills components with src/components/<name>, nothing otherwise', () => {
     expect(importDestHint({ kind: 'component', name: 'button' })).toBe('src/components/button');
     expect(importDestHint({ kind: 'asset', name: 'escacs-mark' })).toBeNull();
+  });
+});
+
+describe('resolveDestination (the one place a folder is decided)', () => {
+  const button = { id: 'components/react/button', kind: 'component', name: 'button', usage: 'copy' };
+  const skill = { id: 'skills/file-pr', kind: 'skill', name: 'file-pr', usage: 'link' };
+  const template = { id: 'templates/agents-md', kind: 'template', name: 'agents-md', payload: 'files', usage: 'copy' };
+
+  it('agrees with the import field, which is what the dry run receives as --to', () => {
+    // The field's prefill (Browse) and the plan used to disagree:
+    // `src/components/button` in the plan, `.stack/components/react/button` on the entry page.
+    expect(resolveDestination(button).dest).toBe('src/components/button');
+    expect(resolveDestination(button).dest).toBe(importDestHint(button));
+    expect(needsImportDest(button) ? importDestHint(button) : '').toBe(resolveDestination(button).dest);
+    expect(defaultImportDest(button)).toBe('.stack/components/react/button');
+  });
+
+  it('lets the user pick win, then the convention, then the CLI fallback', () => {
+    expect(resolveDestination(button, 'src/ui')).toEqual({ dest: 'src/ui', source: 'chosen', label: 'src/ui' });
+    expect(resolveDestination(button, '  ')).toMatchObject({ dest: 'src/components/button', source: 'convention' });
+    expect(resolveDestination(skill)).toEqual({ dest: '.agents/skills/file-pr', source: 'default', label: '.agents/skills/file-pr' });
+  });
+
+  it('reads the project root in words, never as a bare dot', () => {
+    expect(resolveDestination(template)).toEqual({ dest: '.', source: 'default', label: 'project root' });
+    expect(resolveDestination(template, '.')).toMatchObject({ dest: '.', source: 'chosen', label: 'project root' });
+  });
+
+  it('follows the catalog entry, so a non-component copy entry keeps the CLI fallback', () => {
+    const worker = { id: 'workers/mel', kind: 'worker', name: 'mel', usage: 'copy' };
+    expect(resolveDestination(worker)).toMatchObject({ dest: '.stack/workers/mel', source: 'default' });
   });
 });
 

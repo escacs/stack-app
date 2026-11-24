@@ -5,7 +5,7 @@
 // route-only.
 export type Hash = { scenario: string; segs: string[] };
 
-/** Top-level view: the project page, the browse catalog, or no such route. */
+/** Top-level view: the project page, the browse catalog, or no such route. Presets live in Browse. */
 export type View = 'project' | 'browse' | 'missing';
 
 /**
@@ -16,7 +16,18 @@ export function resolveView(segs: string[]): View {
   const v = segs[0] ?? '';
   if (v === '' || v === 'project' || v === 'installed') return 'project';
   if (v === 'browse') return 'browse';
+  // Old `#/presets` links: Presets is a catalog kind now (see `legacyRedirect`).
+  if (v === 'presets') return 'browse';
   return 'missing';
+}
+
+/**
+ * Old routes that moved: `#/presets` is the Presets kind of Browse. Returns
+ * the segments to replace the URL with, or null when the route stands.
+ */
+export function legacyRedirect(segs: string[]): string[] | null {
+  if (segs[0] === 'presets') return ['browse', 'presets'];
+  return null;
 }
 
 export const DEFAULT_SCENARIO = 'populated';

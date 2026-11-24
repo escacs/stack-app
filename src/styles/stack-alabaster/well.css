@@ -1,0 +1,57 @@
+/* stack-alabaster well: recessed Mac chassis well, sheet tray, or footer card.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-well {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  color: var(--on-surface);
+  box-shadow: var(
+    --stack-alabaster-well-recess,
+    inset 0 1px 2px rgb(var(--shadow-rgb) / 0.08),
+    0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.85)
+  );
+}
+
+/* Variants. */
+
+.sa-well--well {
+  background-color: var(--surface-dim);
+}
+
+.sa-well--tray {
+  background-color: var(--surface-low);
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.sa-well--footer {
+  background-color: var(--surface-highest);
+  border-radius: var(--radius-card);
+  padding: var(--space-2) calc(var(--space-2) + 2px);
+  color: var(--on-surface-variant);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-well {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-well {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-well {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid CanvasText;
+    box-shadow: none;
+  }
+}

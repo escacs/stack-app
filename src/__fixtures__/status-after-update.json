@@ -1,0 +1,50 @@
+{
+  "command": "status",
+  "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+  "rows": [
+    {
+      "id": "skills/agent-chain",
+      "path": ".agents/skills/agent-chain",
+      "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+      "local": [
+        "SKILL.md"
+      ],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "edited"
+    },
+    {
+      "id": "skills/agent-lanes",
+      "path": ".agents/skills/agent-lanes",
+      "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    },
+    {
+      "id": "skills/coss",
+      "path": ".agents/skills/coss",
+      "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+      "local": [
+        "LICENSE"
+      ],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "edited"
+    },
+    {
+      "id": "skills/create-agents-md",
+      "path": ".agents/skills/create-agents-md",
+      "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+      "local": [],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "up-to-date"
+    }
+  ]
+}

@@ -1,0 +1,206 @@
+/* stack-alabaster button: Mac Alabaster & Obsidian Ink tactile button.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding-inline: var(--control-padding-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  letter-spacing: var(--tracking-normal);
+  white-space: nowrap;
+  user-select: none;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sa-button svg {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+  flex: none;
+}
+
+/* Pending / idle swap slots. */
+
+.sa-button:not([data-pending]):not([data-loading]) [data-show="pending"],
+.sa-button:is([data-pending], [data-loading]) [data-show="idle"] {
+  display: none !important;
+}
+
+/* Sizes. */
+
+.sa-button--sm {
+  height: var(--control-height-sm);
+  padding-inline: var(--space-2);
+  font-size: var(--font-size-xs);
+}
+
+.sa-button--sm svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.sa-button--md {
+  height: var(--control-height-md);
+  padding-inline: var(--control-padding-x);
+  font-size: var(--font-size-sm);
+}
+
+.sa-button--lg {
+  height: var(--control-height-lg);
+  padding-inline: calc(var(--control-padding-x) + var(--space-1));
+  font-size: var(--font-size-base);
+}
+
+/* Variants. */
+
+.sa-button--raised {
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  color: var(--on-surface);
+  box-shadow: var(--elevation-1);
+}
+
+.sa-button--raised:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-hover) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-hover) * 100%)) 100%
+  );
+}
+
+.sa-button--raised:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-press) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-press) * 100%)) 100%
+  );
+  transform: scale(var(--press-scale));
+}
+
+.sa-button--obsidian {
+  background: var(--stack-alabaster-obsidian-bg, var(--primary));
+  color: var(--on-primary);
+  box-shadow: var(--stack-alabaster-obsidian-shadow, var(--elevation-3));
+}
+
+.sa-button--obsidian:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: color-mix(in srgb, var(--primary), var(--on-primary) calc(var(--state-hover) * 100%));
+}
+
+.sa-button--obsidian:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: var(--primary);
+  box-shadow: var(--elevation-1);
+  transform: scale(var(--press-scale));
+}
+
+.sa-button--ghost {
+  background: transparent;
+  color: var(--on-surface);
+  font-weight: var(--font-weight-medium);
+}
+
+.sa-button--ghost:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-hover));
+}
+
+.sa-button--ghost:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-press));
+  transform: scale(var(--press-scale));
+}
+
+.sa-button--danger {
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  color: var(--error);
+  box-shadow: var(--elevation-1);
+}
+
+.sa-button--danger:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: color-mix(in srgb, var(--error-container), var(--surface) 45%);
+  border-color: color-mix(in srgb, var(--error) 35%, var(--outline-variant));
+}
+
+.sa-button--danger:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]):not([data-loading]) {
+  background: var(--error-container);
+  transform: scale(var(--press-scale));
+}
+
+/* States. */
+
+.sa-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sa-button:disabled,
+.sa-button[data-disabled],
+.sa-button[aria-disabled="true"]:not([data-pending]):not([data-loading]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+.sa-button:is([data-pending], [data-loading]) {
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-button {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-button {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-button {
+    forced-color-adjust: none;
+    border: var(--border-width) solid ButtonText;
+    box-shadow: none;
+  }
+
+  .sa-button--raised,
+  .sa-button--danger {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .sa-button--obsidian {
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .sa-button--ghost {
+    background: Canvas;
+    color: CanvasText;
+    border-color: transparent;
+  }
+
+  .sa-button:disabled,
+  .sa-button[data-disabled],
+  .sa-button[aria-disabled="true"]:not([data-pending]):not([data-loading]) {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sa-button:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

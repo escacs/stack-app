@@ -1,0 +1,62 @@
+{
+  "command": "status",
+  "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+  "rows": [
+    {
+      "id": "skills/agent-chain",
+      "path": ".agents/skills/agent-chain",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [
+        "SKILL.md",
+        "references/roles.md"
+      ],
+      "upstream": [
+        "SKILL.md",
+        "references/roles.md"
+      ],
+      "gone": false,
+      "missing": [],
+      "state": "update-available"
+    },
+    {
+      "id": "skills/agent-lanes",
+      "path": ".agents/skills/agent-lanes",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [],
+      "upstream": [
+        "SKILL.md"
+      ],
+      "gone": false,
+      "missing": [],
+      "state": "update-available"
+    },
+    {
+      "id": "skills/coss",
+      "path": ".agents/skills/coss",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [
+        "LICENSE"
+      ],
+      "upstream": [],
+      "gone": false,
+      "missing": [],
+      "state": "edited"
+    },
+    {
+      "id": "skills/create-agents-md",
+      "path": ".agents/skills/create-agents-md",
+      "commit": "b107cea83231b504294ec416b1901fb661d611aa",
+      "local": [
+        "references/template.md"
+      ],
+      "upstream": [
+        "SKILL.md"
+      ],
+      "gone": false,
+      "missing": [
+        "references/template.md"
+      ],
+      "state": "missing"
+    }
+  ]
+}

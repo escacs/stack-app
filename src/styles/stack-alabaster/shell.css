@@ -1,0 +1,281 @@
+/* stack-alabaster shell: frameless Mac desktop window shell with 52px
+   draggable titlebar, traffic lights, bare L2 mark, 288px sidebar, and
+   elevated white spatial sheet.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--background);
+  color: var(--on-surface);
+  font-family: var(--font-body);
+}
+
+/* 52px draggable Mac titlebar. */
+
+.sa-shell__titlebar {
+  height: 52px;
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-4);
+  padding-inline: var(--space-5);
+  background: var(--stack-alabaster-titlebar-bg, var(--surface-lowest));
+  border-bottom: var(--border-width) solid rgb(var(--shadow-rgb) / 0.10);
+  box-shadow: inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.8);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.sa-shell__titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.sa-shell__titlebar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.sa-shell__titlebar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.sa-shell__titlebar button,
+.sa-shell__titlebar a,
+.sa-shell__titlebar input,
+.sa-shell__titlebar select,
+.sa-shell__titlebar [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+/* Traffic light window buttons (12px dots, 8px gap). */
+
+.sa-shell__traffic {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+
+.sa-shell__traffic-btn {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  flex: none;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.45),
+    0 0 0 0.5px rgb(var(--shadow-rgb) / 0.16);
+  transition:
+    filter var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sa-shell__traffic-btn--close {
+  background: var(--stack-alabaster-traffic-close, var(--error));
+}
+
+.sa-shell__traffic-btn--minimize {
+  background: var(--stack-alabaster-traffic-min, var(--warning));
+}
+
+.sa-shell__traffic-btn--maximize {
+  background: var(--stack-alabaster-traffic-max, var(--success));
+}
+
+.sa-shell__traffic-btn:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  filter: brightness(0.92);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.55),
+    0 0 0 0.5px rgb(var(--shadow-rgb) / 0.28);
+}
+
+.sa-shell__traffic-btn:is(:active, [data-pressed]):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):not([data-pending]) {
+  filter: brightness(0.84);
+  transform: scale(var(--press-scale));
+}
+
+.sa-shell__traffic-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sa-shell__traffic-btn:disabled,
+.sa-shell__traffic-btn[data-disabled],
+.sa-shell__traffic-btn[aria-disabled="true"]:not([data-pending]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* Bare 20px L2 Folded "S" mark + brandTitle directly in titlebar. */
+
+.sa-shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--on-surface);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  min-width: 0;
+  -webkit-app-region: drag;
+}
+
+.sa-shell__brand-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: block;
+}
+
+.sa-shell__brand-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Workspace body: 288px sidebar + elevated white spatial sheet. */
+
+.sa-shell__workspace {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.sa-shell--hide-sidebar .sa-shell__workspace {
+  display: flex;
+  justify-content: center;
+}
+
+.sa-shell__sidebar {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4) var(--space-4) var(--space-5);
+  min-width: 0;
+  min-height: 0;
+}
+
+.sa-shell__sidebar-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sa-shell__sidebar-footer {
+  flex: none;
+}
+
+.sa-shell__sheet-wrap {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4) var(--space-5) var(--space-4) var(--space-1);
+}
+
+.sa-shell--hide-sidebar .sa-shell__sheet-wrap {
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin-inline: auto;
+  padding: var(--space-5) var(--space-6);
+}
+
+.sa-shell__sheet {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--on-surface);
+  border-radius: var(--radius-panel, 14px);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-8) calc(var(--space-10) + var(--space-1)) var(--space-6);
+}
+
+.sa-shell__sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: var(--panel-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-shell__traffic-btn {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-shell__traffic-btn {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-shell {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .sa-shell__titlebar {
+    background: Canvas;
+    border-bottom-color: ButtonText;
+    box-shadow: none;
+  }
+
+  .sa-shell__traffic-btn {
+    background: ButtonFace;
+    border: var(--border-width) solid ButtonText;
+    box-shadow: none;
+  }
+
+  .sa-shell__traffic-btn:disabled,
+  .sa-shell__traffic-btn[data-disabled],
+  .sa-shell__traffic-btn[aria-disabled="true"]:not([data-pending]) {
+    background: Canvas;
+    border-color: GrayText;
+  }
+
+  .sa-shell__sheet {
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid ButtonText;
+    box-shadow: none;
+  }
+
+  .sa-shell__sheet::after {
+    box-shadow: none;
+  }
+
+  .sa-shell__traffic-btn:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

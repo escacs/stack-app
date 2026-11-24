@@ -1,0 +1,1 @@
+--resolve needs <file>=mine or <file>=upstream, got "a=bad". Example: --resolve SKILL.md=mine

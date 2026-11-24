@@ -3,19 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <title>Stack</title>
 <style>
-  html, body {
-    margin: 0;
-    height: 100%;
-    background: #000;
-    color: #e8e8e8;
-    font-family: ui-monospace, /* taste-skill-ignore: mono is the chosen style */ SFMono-Regular, Menlo, Consolas, monospace;
-  }
+  html, body { margin: 0; height: 100%; background: Canvas; color: CanvasText; font-family: system-ui, sans-serif; }
   #root { height: 100%; }
-  .boot { padding: 2rem; color: #555; }
+  .boot { padding: 2rem; opacity: .5; }
 </style>
+  <script>try{var t=localStorage.getItem('stack-app.theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
 <div id="root"><p class="boot">stack…</p></div>

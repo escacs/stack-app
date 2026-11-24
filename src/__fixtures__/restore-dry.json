@@ -1,0 +1,20 @@
+{
+  "command": "restore",
+  "dryRun": true,
+  "restored": [
+    ".agents/skills/create-agents-md/references/template.md"
+  ],
+  "kept": [
+    ".agents/skills/agent-chain/SKILL.md",
+    ".agents/skills/agent-chain/references/roles.md",
+    ".agents/skills/coss/LICENSE"
+  ],
+  "skipped": [],
+  "pruned": [],
+  "worker": {
+    "name": "dev",
+    "id": "workers/dev",
+    "path": ".stack/workers/dev",
+    "source": "github"
+  }
+}

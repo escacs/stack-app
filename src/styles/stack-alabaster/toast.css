@@ -1,0 +1,389 @@
+/* stack-alabaster toast: anchored floating Mac Alabaster notification cards.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras.
+   Collapsed stack peeks behind the front card; hover/focus expands it. */
+
+.sa-toast-region {
+  position: fixed;
+  inset: auto;
+  z-index: 60;
+  box-sizing: border-box;
+  display: block;
+  width: 22rem;
+  max-width: calc(100vw - var(--space-8));
+  height: var(--toast-front-height, auto);
+  margin: var(--space-4);
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  transition: height var(--duration-base, 180ms) var(--ease-spring);
+}
+
+.sa-toast-region[data-expanded] {
+  height: calc(var(--toast-stack-height, 0px) + (var(--toast-count, 1) - 1) * var(--space-2));
+}
+
+.sa-toast-region[data-side="bottom"] {
+  bottom: calc(var(--keyboard-inset, 0px) + env(safe-area-inset-bottom, 0px));
+}
+
+.sa-toast-region[data-side="top"] {
+  top: env(safe-area-inset-top, 0px);
+}
+
+.sa-toast-region[data-align="end"] {
+  inset-inline-end: env(safe-area-inset-right, 0px);
+}
+
+.sa-toast-region[data-align="start"] {
+  inset-inline-start: env(safe-area-inset-left, 0px);
+}
+
+.sa-toast-region[data-align="center"] {
+  left: 50%;
+  margin-inline: 0;
+  translate: -50% 0;
+}
+
+.sa-toast-region [data-slot="toast-list"] {
+  position: relative;
+  display: block;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Notification card: layered hairline + inner highlight + soft elevation. */
+
+.sa-toast {
+  position: absolute;
+  inset-inline: 0;
+  z-index: calc(100 - var(--toast-index, 0));
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  height: var(--toast-height, auto);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  backdrop-filter: none;
+  color: var(--on-surface);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 1),
+    0 0 0 var(--border-width) rgb(var(--shadow-rgb) / 0.09),
+    0 1px 2px rgb(var(--shadow-rgb) / 0.05),
+    0 8px 16px -4px rgb(var(--shadow-rgb) / 0.1),
+    0 20px 40px -12px rgb(var(--shadow-rgb) / 0.2);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  outline: none;
+  pointer-events: auto;
+  user-select: none;
+  opacity: 1;
+  translate: var(--toast-swipe-x, 0px) calc(var(--sa-toast-y, 0px) + var(--toast-swipe-y, 0px));
+  scale: calc(1 - var(--toast-index, 0) * 0.045);
+  transition-property: translate, scale, opacity, height;
+  transition-duration: var(--duration-slow);
+  transition-timing-function: var(--ease-spring);
+}
+
+.sa-toast-region[data-side="bottom"] .sa-toast {
+  bottom: 0;
+  --sa-toast-y: calc(var(--toast-index, 0) * var(--space-2) * -1);
+}
+
+.sa-toast-region[data-side="top"] .sa-toast {
+  top: 0;
+  --sa-toast-y: calc(var(--toast-index, 0) * var(--space-2));
+}
+
+/* Collapsed cards behind the front one: clipped, peeked, non-interactive. */
+
+.sa-toast:not([data-front]):not([data-expanded]) {
+  height: var(--toast-front-height, auto);
+  overflow: hidden;
+}
+
+.sa-toast:not([data-front]):not([data-expanded]) > * {
+  pointer-events: none;
+}
+
+/* Expanded stack: full height, full scale, offset by cards in front. */
+
+.sa-toast-region[data-side="bottom"] .sa-toast[data-expanded] {
+  --sa-toast-y: calc(-1 * (var(--toast-offset, 0px) + var(--toast-index, 0) * var(--space-2)));
+  scale: 1;
+  height: var(--toast-height, auto);
+}
+
+.sa-toast-region[data-side="top"] .sa-toast[data-expanded] {
+  --sa-toast-y: calc(var(--toast-offset, 0px) + var(--toast-index, 0) * var(--space-2));
+  scale: 1;
+  height: var(--toast-height, auto);
+}
+
+/* Entering and leaving. */
+
+.sa-toast[data-starting-style] {
+  transition: none;
+}
+
+.sa-toast-region[data-side="bottom"] .sa-toast[data-starting-style][data-front] {
+  --sa-toast-y: 100%;
+  opacity: 0;
+}
+
+.sa-toast-region[data-side="top"] .sa-toast[data-starting-style][data-front] {
+  --sa-toast-y: -100%;
+  opacity: 0;
+}
+
+.sa-toast:is([data-starting-style]:not([data-front]), [data-ending-style]) {
+  opacity: 0;
+}
+
+.sa-toast[data-ending-style]:not([data-swipe-direction]) {
+  scale: 0.97;
+}
+
+.sa-toast[data-ending-style][data-swipe-direction="left"] {
+  translate: -110% 0;
+}
+
+.sa-toast[data-ending-style][data-swipe-direction="right"] {
+  translate: 110% 0;
+}
+
+.sa-toast[data-ending-style][data-swipe-direction="up"] {
+  translate: 0 -110%;
+}
+
+.sa-toast[data-ending-style][data-swipe-direction="down"] {
+  translate: 0 110%;
+}
+
+.sa-toast[data-swiping] {
+  transition: none;
+  cursor: grabbing;
+}
+
+.sa-toast:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Tone lives only in the icon chip: a soft tinted disc with a tone glyph. */
+
+.sa-toast[data-type="success"] {
+  --sa-toast-tone: var(--success);
+  --sa-toast-tone-bg: var(--success-container);
+}
+
+.sa-toast[data-type="error"] {
+  --sa-toast-tone: var(--error);
+  --sa-toast-tone-bg: var(--error-container);
+}
+
+.sa-toast[data-type="warning"] {
+  --sa-toast-tone: var(--warning);
+  --sa-toast-tone-bg: var(--warning-container);
+}
+
+.sa-toast[data-type="info"] {
+  --sa-toast-tone: var(--info);
+  --sa-toast-tone-bg: var(--info-container);
+}
+
+.sa-toast__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--sa-toast-tone-bg, var(--surface-low));
+  box-shadow: inset 0 0 0 var(--border-width) color-mix(in srgb, var(--sa-toast-tone, var(--outline)) 14%, transparent);
+  color: var(--sa-toast-tone, var(--on-surface-variant));
+}
+
+.sa-toast__icon--loading > svg {
+  animation: sa-toast-spin 900ms linear infinite;
+}
+
+@keyframes sa-toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sa-toast__body {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-block: var(--space-1);
+}
+
+.sa-toast__body > .sa-toast__action {
+  margin-top: var(--space-2);
+}
+
+.sa-toast__title {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-normal);
+}
+
+.sa-toast__description {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  text-wrap: pretty;
+}
+
+:where(.sa-toast__action, .sa-toast__close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: none;
+  align-self: flex-start;
+  height: var(--control-height-sm);
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  color: var(--on-surface);
+  box-shadow: var(--elevation-1);
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+:where(.sa-toast__action, .sa-toast__close):hover:not(:disabled):not([aria-disabled="true"]) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-hover) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-hover) * 100%)) 100%
+  );
+}
+
+:where(.sa-toast__action, .sa-toast__close):active:not(:disabled):not([aria-disabled="true"]) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.sa-toast__action, .sa-toast__close):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+:where(.sa-toast__action, .sa-toast__close)[data-pending] {
+  opacity: var(--state-disabled-opacity);
+  cursor: wait;
+}
+
+/* Quiet icon dismiss: always present, calm until hovered. */
+
+.sa-toast__dismiss {
+  align-self: flex-start;
+  width: var(--control-height-sm);
+  padding-inline: 0;
+  background: transparent;
+  color: var(--on-surface-variant);
+  box-shadow: none;
+}
+
+.sa-toast__dismiss:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: rgb(var(--on-surface-rgb) / var(--state-hover));
+  color: var(--on-surface);
+}
+
+.sa-toast__dismiss:active:not(:disabled):not([aria-disabled="true"]) {
+  background: rgb(var(--on-surface-rgb) / var(--state-press));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-toast-region,
+  .sa-toast,
+  :where(.sa-toast__action, .sa-toast__close) {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .sa-toast {
+    scale: 1;
+  }
+
+  .sa-toast:not([data-front]):not([data-expanded]) {
+    visibility: hidden;
+  }
+}
+
+[data-reduce-motion="true"] .sa-toast-region,
+[data-reduce-motion="true"] .sa-toast,
+[data-reduce-motion="true"] :where(.sa-toast__action, .sa-toast__close) {
+  animation: none !important;
+  transition: none !important;
+}
+
+[data-reduce-motion="true"] .sa-toast {
+  scale: 1;
+}
+
+[data-reduce-motion="true"] .sa-toast:not([data-front]):not([data-expanded]) {
+  visibility: hidden;
+}
+
+@media (forced-colors: active) {
+  .sa-toast {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid CanvasText;
+    box-shadow: none;
+  }
+
+  .sa-toast__icon {
+    background: Canvas;
+    box-shadow: inset 0 0 0 var(--border-width) CanvasText;
+  }
+
+  .sa-toast__icon {
+    color: CanvasText;
+  }
+
+  :where(.sa-toast__action, .sa-toast__close) {
+    forced-color-adjust: none;
+    background: ButtonFace;
+    color: ButtonText;
+    border: var(--border-width) solid ButtonText;
+    box-shadow: none;
+  }
+
+  .sa-toast__dismiss {
+    color: ButtonText;
+  }
+
+  .sa-toast:focus-visible,
+  :where(.sa-toast__action, .sa-toast__close):focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

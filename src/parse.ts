@@ -5,6 +5,7 @@
 // stay exported only as documentation of the human-readable formats — do not
 // use them for new UI. The kind/manifest/row helpers (kindOf, pluralOf,
 // KINDS, manifestName, manifestList, rowState) are live and shared.
+import { LABEL, STATE_WORD } from './vocab';
 
 export type CatalogEntry = {
   id: string;
@@ -129,89 +130,72 @@ export type StatusRow = {
   path: string;
   local: string[];
   upstreamCount: number | null;
+  /** Files changed upstream (names relative to the import's folder); absent on rows built from text. */
+  upstream?: string[];
+  /** Imported files deleted from the project (a subset of `local`: the CLI counts a deletion as a local change). */
+  missing?: string[];
+  /** The CLI's state word when it sent one (newer CLIs). */
+  state?: 'up-to-date' | 'update-available' | 'edited' | 'missing' | 'gone';
   gone: boolean;
 };
 
 export type LockStatus = { commit: string | null; rows: StatusRow[] };
 
-// formatStatus(): `stack at <sha>` then
-// `<*| > <id> @<sha> -> <path>[  (<bit>; <bit>)]`
-// bits: `removed from stack` | `update: N file(s)` | `edited here: f, …`
-/** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
-export function parseStatus(text: string): LockStatus {
-  // Keep leading markers (`* `/`  `); drop trailing whitespace only.
-  const lines = text.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
-  if (!lines.length || lines[0].startsWith('No stack imports here')) {
-    return { commit: null, rows: [] };
-  }
-  const commit = /^stack at ([0-9a-f]+)/.exec(lines[0])?.[1] ?? null;
-  const rows: StatusRow[] = [];
-  for (const line of lines.slice(1)) {
-    const m = /^[* ] (\S+) @([0-9a-f]+) -> (\S+?)(?: {2,}\((.*)\))?$/.exec(line);
-    if (!m) continue;
-    const [, id, c, path, bits] = m;
-    const row: StatusRow = { id, commit: c, path, local: [], upstreamCount: null, gone: false };
-    for (const bit of (bits ?? '').split(';').map((s) => s.trim())) {
-      if (bit === 'removed from stack') row.gone = true;
-      else if (bit.startsWith('update: ')) {
-        const n = /^update: (\d+) files?/.exec(bit)?.[1];
-        row.upstreamCount = n ? parseInt(n, 10) : 0;
-      } else if (bit.startsWith('edited here: ')) {
-        row.local = bit.slice('edited here: '.length).split(',').map((s) => s.trim()).filter(Boolean);
-      }
-    }
-    rows.push(row);
-  }
-  return { commit, rows };
-}
+export type RowState = 'imported' | 'edited' | 'update' | 'missing' | 'gone';
 
-export type RowState = 'imported' | 'edited' | 'update' | 'gone';
+/** Imported files that are no longer in the project. */
+export const missingOf = (r: StatusRow): string[] => (r.gone ? [] : r.missing ?? []);
 
+/** Files the user changed on purpose: local changes minus the deleted ones. */
+export const editedOf = (r: StatusRow): string[] => {
+  const m = new Set(r.missing ?? []);
+  return r.local.filter((f) => !m.has(f));
+};
+
+/**
+ * The state a row shows in a chip: the highest-priority fact. A row can be
+ * missing files AND updated AND edited; the page lists every fact, the chip
+ * names the one to act on first (gone > missing > update > edited).
+ */
 export function rowState(r: StatusRow): RowState {
   if (r.gone) return 'gone';
+  if (missingOf(r).length) return 'missing';
   if (r.upstreamCount) return 'update';
-  if (r.local.length) return 'edited';
+  if (editedOf(r).length) return 'edited';
   return 'imported';
 }
 
-/** Rows with upstream changes waiting (the footer's update count). */
+/** The CLI's state word for a row state (`status --json` `state`), so the two can be compared. */
+export const CLI_STATE: Record<RowState, NonNullable<StatusRow['state']>> = {
+  imported: 'up-to-date',
+  edited: 'edited',
+  update: 'update-available',
+  missing: 'missing',
+  gone: 'gone',
+};
+
+/** Every state a row is in at once (priority order); `imported` only when it is none of the others. */
+export function rowFacts(r: StatusRow): RowState[] {
+  const out: RowState[] = [];
+  if (r.gone) out.push('gone');
+  if (missingOf(r).length) out.push('missing');
+  if (!r.gone && r.upstreamCount) out.push('update');
+  if (!r.gone && editedOf(r).length) out.push('edited');
+  return out.length ? out : ['imported'];
+}
+
+/** The word a row state shows (badges and chips; verbs never reuse them). */
+export const rowWord = (st: RowState): string =>
+  st === 'imported' ? LABEL.upToDate : st === 'missing' ? LABEL.missingFiles : STATE_WORD[st] ?? st;
+
+/** The one tone each row state carries. */
+export const rowTone = (st: RowState): 'success' | 'warning' | 'error' =>
+  st === 'imported' ? 'success' : st === 'gone' ? 'error' : 'warning';
+
+/** Rows with upstream changes waiting (the footer's update count), whatever else they are. */
 export function countUpdates(rows: StatusRow[]): number {
-  return rows.filter((r) => rowState(r) === 'update').length;
+  return rows.filter((r) => !r.gone && (r.upstreamCount ?? 0) > 0).length;
 }
 
-export type OpLine = { tag: string; text: string };
-
-// Op logs: `<tag><spaces><rest>` (tags: import update remove kept skip
-// merged restored note gone have ignore CONFLICT) or bare lines.
-/** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
-export function parseOpLog(text: string): OpLine[] {
-  const out: OpLine[] = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.trimEnd();
-    if (!line.trim()) continue;
-    const m = /^([A-Za-z]+) {2,}(\S.*)$/.exec(line) ?? /^([A-Z]+) (\S.*)$/.exec(line);
-    out.push(m ? { tag: m[1], text: m[2] } : { tag: '', text: line.trim() });
-  }
-  return out;
-}
-
-/** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
-export const conflictLines = (lines: OpLine[]): OpLine[] =>
-  lines.filter((l) => l.tag === 'CONFLICT');
-
-// import refusal: `these files already exist with other content; …:`
-// followed by `  <file>` lines.
-/** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
-export function importConflicts(text: string): string[] {
-  const lines = text.split('\n');
-  const i = lines.findIndex((l) => l.includes('already exist with other content'));
-  if (i < 0) return [];
-  return lines
-    .slice(i + 1)
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
-
-/** @deprecated Superseded by json.ts --json decoders; do not use for new UI. */
-export const hasMergeMarkersNote = (text: string): boolean =>
-  text.includes('<<<<<<<');
+/** True when at least one row has imported files missing: the only time restoring does anything. */
+export const hasMissing = (rows: readonly StatusRow[]): boolean => rows.some((r) => missingOf(r).length > 0);

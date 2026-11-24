@@ -1,7 +1,7 @@
 // Shared app state: bridge config, node probe, workers, lock status, stack
 // validation. Views keep their own local state (search text, form fields,
 // op results).
-import { createMemo, createSignal } from 'solid-js';
+import { createSignal } from 'solid-js';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -11,6 +11,7 @@ import {
   linkStackCli,
   nodeStatus,
   pickFolder,
+  readProjectFile,
   provisionStack,
   saveConfig,
   stackCliStatus,
@@ -29,9 +30,14 @@ import {
   type ListJson,
   type StatusJson,
 } from './json';
-import { toStatusRows } from './json';
+import { lacksMissing, toStatusRows, withMissing } from './json';
 import { href, parseHash } from './router';
-import type { LockStatus } from './parse';
+import { rowState, type LockStatus } from './parse';
+import { clearT3Workspace, refreshT3Workspace, t3Info } from './t3';
+import { reconcileRemembered } from './onboard';
+import { pushToast } from './toast';
+import { humanizeCliError, oneSentence, cliStatusText, provisionText } from './humanize';
+import { retargetToast } from './undo';
 
 export const [config, setConfig] = createSignal<AppConfig | null>(null);
 export const [node, setNode] = createSignal<NodeStatus | null>(null);
@@ -60,10 +66,12 @@ export const [appUpdate, setAppUpdate] = createSignal<string | null>(null);
 // First-run onboarding: set when the user continues past "who" without a
 // worker (empty stack or failed list). Session-only.
 export const [workerSkipped, setWorkerSkipped] = createSignal(false);
-// Session-only: each launch asks who, then which project, even when both
-// are remembered (the remembered ones are just preselected).
-export const [whoDone, setWhoDone] = createSignal(false);
-export const [projectDone, setProjectDone] = createSignal(false);
+// The worker and project are remembered across launches (config.json), so
+// these start true once boot has reconciled them; they go false only while
+// the user switches (the remembered answer stays preselected, and cancel
+// just flips them back).
+export const [whoDone, setWhoDone] = createSignal(true);
+export const [projectDone, setProjectDone] = createSignal(true);
 // Last failed user action (a save, a bad project path, a stack re-check).
 // Rendered once by App as a conflict line; cleared by the next action.
 export const [actionError, setActionError] = createSignal<string | null>(null);
@@ -90,16 +98,22 @@ export async function addStackCommand(): Promise<void> {
   linkingCli = true;
   try {
     const l = await guard('stack command', () => linkStackCli(c.stackPath));
-    setCliNote(l.status === 'linked-ok' ? null : { text: l.message, offerLink: false });
+    setCliNote(l.status === 'linked-ok' ? null : { text: cliStatusText(l), offerLink: false });
   } catch (err) {
-    setCliNote({ text: errText(err), offerLink: false });
+    setCliNote({ text: oneSentence(humanizeCliError(errText(err))), offerLink: false });
   } finally {
     linkingCli = false;
   }
 }
 
-export const project = createMemo(() => config()?.project ?? null);
-export const workerName = createMemo(() => config()?.worker ?? null);
+/** Force the stack setup screen over a working stack (the "Open stack setup" action). */
+export const [showSetup, setShowSetup] = createSignal(false);
+
+/** Imports that need a look: update available, edited or missing files. */
+export const attentionCount = (): number => lock().rows.filter((r) => rowState(r) !== 'imported').length;
+
+export const project = (): string | null => config()?.project ?? null;
+export const workerName = (): string | null => config()?.worker ?? null;
 
 function emptyLock(): LockStatus {
   return { commit: null, rows: [] };
@@ -126,8 +140,9 @@ async function guard<T>(label: string, fn: () => Promise<T>): Promise<T> {
  */
 async function persist(label: string, next: AppConfig): Promise<string | null> {
   try {
-    // The user and the project are asked every launch, never remembered.
-    await guard(label, () => saveConfig({ ...next, worker: null, project: null }));
+    // The worker and the project are remembered. A retargeted worktree is a
+    // temporary target, so the project saved is the one the user opened.
+    await guard(label, () => saveConfig({ ...next, project: homeProject }));
     return null;
   } catch (err) {
     return errText(err);
@@ -142,6 +157,10 @@ async function checkProject(path: string): Promise<ProjectReport> {
     return { path, valid: false, markers: [], errors: [errText(err)] };
   }
 }
+
+// The project the user opened (what is remembered); the active target can
+// differ while a worktree is retargeted.
+let homeProject: string | null = null;
 
 let booted = false;
 
@@ -171,17 +190,36 @@ export async function boot(): Promise<void> {
     // Older configs predate scanRoots; normalize so views can rely on it.
     if (!Array.isArray(c.scanRoots)) c.scanRoots = [];
     setConfigNotice(c.notice ?? null);
-    // Nothing is remembered: an older config's user and project are dropped.
-    if (c.worker || c.project) {
-      c.worker = null;
-      c.project = null;
-      void persist('config', c);
-    }
     // Stack, report and workers land before the config: the shell gates on
-    // config, so it must never render against a half-loaded state.
+    // config, so it must never render against a half-loaded state. The
+    // remembered worker and project are checked here, so a stale one shows
+    // only its own onboarding step and the rest opens straight in.
     const s = await validateStack(c.stackPath);
     setStack(s);
-    if (c.project) setReport(await checkProject(c.project));
+    let workerNames: string[] | null = null;
+    if (s.valid) {
+      await refreshWorkers(c);
+      if (!workersError()) workerNames = workers().map((w) => w.name);
+    }
+    const rep = c.project ? await checkProject(c.project) : null;
+    const kept = reconcileRemembered({
+      worker: c.worker,
+      project: c.project,
+      workerNames,
+      projectValid: rep ? rep.valid : null,
+    });
+    c.worker = kept.worker;
+    c.project = kept.project;
+    homeProject = c.project;
+    if (kept.droppedWorker || kept.droppedProject) {
+      void persist('config', c);
+      if (kept.droppedProject) {
+        pushToast({ tone: 'warning', title: 'Last project is unavailable', description: kept.droppedProject });
+      } else if (kept.droppedWorker) {
+        pushToast({ tone: 'warning', title: `Worker ${kept.droppedWorker} is no longer in this stack`, description: 'Pick a worker to continue.' });
+      }
+    }
+    setReport(c.project && rep?.valid ? rep : null);
     setConfig(c);
     if (!s.valid) return;
     // A valid stack whose `stack` command is not linked gets one quiet line
@@ -190,20 +228,20 @@ export async function boot(): Promise<void> {
       const cli = await stackCliStatus(c.stackPath);
       if (cli.status !== 'linked-ok') {
         // Only a missing link is fixable in-app; conflicts just explain.
-        setCliNote({ text: cli.message, offerLink: cli.status === 'missing' });
+        setCliNote({ text: cliStatusText(cli), offerLink: cli.status === 'missing' });
       }
     } catch {
       // No cli state (older shell, odd checkout): stay quiet.
     }
-    await refreshWorkers();
     if (c.project && n.ok) await refreshLock();
+    if (c.project) void refreshT3Workspace(c.project);
   } catch (err) {
     setBootError(errText(err));
   }
 }
 
-export async function refreshWorkers(): Promise<void> {
-  const c = config();
+export async function refreshWorkers(from?: AppConfig): Promise<void> {
+  const c = from ?? config();
   if (!c) return;
   setWorkersError(null);
   setWorkersLoaded(false);
@@ -235,7 +273,17 @@ export async function refreshReport(): Promise<void> {
 
 let lockSeq = 0;
 
-export async function refreshLock(): Promise<void> {
+/**
+ * Quiet refresh for the Project tab badge: on focus / visibility and every few
+ * minutes. Skips while any operation runs (a read mid-import would lie) and
+ * never shows the busy text.
+ */
+export async function backgroundRefresh(): Promise<void> {
+  if (busy() !== null || inflight.length || !config()?.project || stack()?.valid === false) return;
+  await refreshLock({ silent: true });
+}
+
+export async function refreshLock(opts: { silent?: boolean } = {}): Promise<void> {
   const c = config();
   const seq = ++lockSeq;
   const proj = c?.project ?? null;
@@ -247,8 +295,14 @@ export async function refreshLock(): Promise<void> {
   let rows: LockStatus;
   let err: string | null = null;
   try {
-    const out = await guard('status', () => stackRun('status', ['--json'], proj, c.stackPath));
-    rows = toStatusRows(fromStackOut<StatusJson>(out));
+    const read = () => stackRun('status', ['--json'], proj, c.stackPath);
+    const out = await (opts.silent ? read() : guard('status', read));
+    const parsed = toStatusRows(fromStackOut<StatusJson>(out));
+    // An older CLI counts a deleted file as a local change only; those rows are checked on disk.
+    // Newer CLIs name each row's missing files; only an older CLI (no `missing` field) needs the file check.
+    rows = lacksMissing(parsed.rows)
+      ? { ...parsed, rows: await withMissing(parsed.rows, async (p) => (await readProjectFile(proj, p)).exists) }
+      : parsed;
   } catch (e) {
     rows = emptyLock();
     err = errText(e);
@@ -272,6 +326,7 @@ export async function revalidateStack(): Promise<void> {
     return;
   }
   setStack(s);
+  if (s.valid) setShowSetup(false);
   if (!s.valid) {
     // Nothing can be asked of an unusable stack: drop what the old one said.
     setWorkers([]);
@@ -334,15 +389,15 @@ async function autoLinkCli(stackDir: string | null, prefix: string | null): Prom
     if (l.status === 'linked-ok') {
       // A fresh link gets its one quiet line; an already-correct link
       // stays silent (a provision prefix still shows on its own).
-      const linked = l.message.startsWith('linked ') ? `stack command linked → ${l.link}` : null;
-      const text = prefix && linked ? `${prefix}; ${linked}` : (prefix ?? linked);
+      const linked = l.message.startsWith('linked ') ? 'The `stack` command is now set up.' : null;
+      const text = prefix && linked ? `${provisionText(prefix)} ${linked}` : (prefix ? provisionText(prefix) : linked);
       if (text) setCliNote({ text, offerLink: false });
       return;
     }
-    setCliNote({ text: prefix ? `${prefix}; ${l.message}` : l.message, offerLink: false });
+    setCliNote({ text: prefix ? `${provisionText(prefix)} ${cliStatusText(l)}` : cliStatusText(l), offerLink: false });
   } catch (err) {
-    const text = prefix ? `${prefix}; ${errText(err)}` : errText(err);
-    setCliNote({ text, offerLink: false });
+    const why = oneSentence(humanizeCliError(errText(err)));
+    setCliNote({ text: prefix ? `${provisionText(prefix)} ${why}` : why, offerLink: false });
   }
 }
 
@@ -379,31 +434,52 @@ export async function clearStackPath(): Promise<void> {
   if (err) setActionError(err);
 }
 
-/** Set (or clear) the remembered worker. Failure keeps the previous worker. */
+/**
+ * Set (or clear) the worker and remember it. The screen changes first; a
+ * failed save surfaces as an error line and the worker still applies for
+ * this session.
+ */
 export async function chooseWorker(name: string | null): Promise<void> {
   const c = config();
   if (!c) return;
   setActionError(null);
-  // Not saved (see persist): no IPC wait before the screen changes.
   const next = { ...c, worker: name };
-  // A new answer to who always re-asks the project.
   setWhoDone(name !== null);
-  setProjectDone(false);
+  setWorkerSkipped(false);
   setConfig(next);
+  const err = await persist('config', next);
+  if (err) setActionError(err);
 }
 
 /** Continue past who without a user (empty stack or failed list). */
 export function skipWorker(): void {
   setWorkerSkipped(true);
   setWhoDone(true);
+}
+
+/** Open the who step again (the pill, the palette). The current worker stays preselected and remembered until another is picked. */
+export function switchWorker(): void {
+  setWhoDone(false);
+}
+
+/** Leave the who step without changing the worker (Esc). Only when there is one to go back to. */
+export function cancelSwitchWorker(): boolean {
+  const c = config();
+  if (!c?.worker && !workerSkipped()) return false;
+  setWhoDone(true);
+  return true;
+}
+
+/** Open the project step again; the current project stays remembered until another is picked. */
+export function switchProject(): void {
   setProjectDone(false);
 }
 
-/** Back to the who screen: forget the user, even a skipped one. */
-export async function switchWorker(): Promise<void> {
-  setWorkerSkipped(false);
-  setWhoDone(false);
-  await chooseWorker(null);
+/** Leave the project step without changing the project (Esc). Only when there is one to go back to. */
+export function cancelSwitchProject(): boolean {
+  if (!config()?.project) return false;
+  setProjectDone(true);
+  return true;
 }
 
 /**
@@ -420,6 +496,7 @@ export async function chooseProject(path: string | null): Promise<void> {
     setReport(null);
     setLock(emptyLock());
     setProjectDone(false);
+    clearT3Workspace();
     setConfig(next);
     return;
   }
@@ -429,16 +506,46 @@ export async function chooseProject(path: string | null): Promise<void> {
     return;
   }
   const next = { ...(config() ?? c), project: path };
-  // The bridge returns the saved config with the path added to recents. It
-  // holds no user or project (neither is saved), so the session's own stay.
+  // The bridge returns the saved config with the path added to recents; the
+  // session's worker stays, and the opened project is remembered below.
   const cfg = await addRecentProject(path).catch(() => next);
+  homeProject = rep.path;
+  void persist('config', { ...cfg, worker: next.worker, project: rep.path });
   // A mid-session config reset surfaces its notice here, as at boot.
   setConfigNotice(cfg.notice ?? null);
   setReport(rep);
   setLock(emptyLock());
   setProjectDone(true);
-  setConfig({ ...cfg, worker: next.worker, project: path });
+  setConfig({ ...cfg, worker: next.worker, project: rep.path });
   // Opening a project lands on the project page, whatever route was showing.
   location.hash = href(parseHash(location.hash).scenario, 'project');
+  void refreshT3Workspace(rep.path);
   await refreshLock();
+}
+
+/**
+ * Switch the active target folder to another worktree/branch of the current
+ * repo without adding temporary worktree paths to recent projects or leaving
+ * the current view.
+ */
+export async function switchTargetDir(path: string, opts: { quiet?: boolean } = {}): Promise<void> {
+  const c = config();
+  if (!c || c.project === path) return;
+  const from = c.project;
+  setActionError(null);
+  const rep = await checkProject(path);
+  if (!rep.valid) {
+    const msg = rep.errors[0] ?? `${path} is not a usable worktree folder.`;
+    setActionError(msg);
+    pushToast({ tone: 'error', title: 'Could not switch folders', description: oneSentence(humanizeCliError(msg)) });
+    return;
+  }
+  const branch = t3Info()?.worktrees.find((w) => w.path === path || w.path === rep.path)?.branch ?? null;
+  setReport(rep);
+  setLock(emptyLock());
+  setConfig({ ...(config() ?? c), project: rep.path });
+  void refreshT3Workspace(rep.path);
+  await refreshLock();
+  if (opts.quiet) return;
+  pushToast(retargetToast(branch ?? path, from, (back) => void switchTargetDir(back, { quiet: true })));
 }

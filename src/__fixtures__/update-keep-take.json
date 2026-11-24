@@ -1,0 +1,29 @@
+{
+  "command": "update",
+  "commit": "205cd82542b4ab880be8f530c79105136eed1cbb",
+  "updated": [
+    {
+      "id": "skills/agent-chain",
+      "changed": 2,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "outcome": "kept-mine"
+        },
+        {
+          "path": "references/roles.md",
+          "outcome": "took-upstream"
+        }
+      ]
+    }
+  ],
+  "conflicts": [],
+  "merged": [],
+  "kept": [
+    ".agents/skills/agent-chain/SKILL.md"
+  ],
+  "skipped": [],
+  "gone": [],
+  "imported": [],
+  "upToDate": false
+}

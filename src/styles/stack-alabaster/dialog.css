@@ -1,0 +1,284 @@
+/* stack-alabaster dialog: opaque Mac Alabaster modal dialog & alert dialog.
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background:
+    radial-gradient(
+      120% 90% at 50% 38%,
+      rgb(var(--shadow-rgb) / 0.2) 0%,
+      rgb(var(--shadow-rgb) / 0.34) 100%
+    );
+  backdrop-filter: none;
+  opacity: 1;
+  transition: opacity var(--duration-slow) var(--ease-spring-soft);
+}
+
+.sa-dialog__backdrop[data-starting-style],
+.sa-dialog__backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+.sa-dialog__backdrop[data-ending-style] {
+  transition-duration: var(--duration-fast);
+}
+
+/* Surface: pure sheet white, hairline ring, top specular, layered soft elevation. */
+
+.sa-dialog__content {
+  --sa-dialog-pad: var(--space-6);
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(28rem, calc(100% - var(--space-8)));
+  height: fit-content;
+  max-height: calc(100dvh - var(--space-8));
+  margin: auto;
+  padding: var(--sa-dialog-pad);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  backdrop-filter: none;
+  color: var(--on-surface);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 1),
+    0 0 0 var(--border-width) rgb(var(--shadow-rgb) / 0.1),
+    0 2px 4px rgb(var(--shadow-rgb) / 0.05),
+    0 12px 24px -4px rgb(var(--shadow-rgb) / 0.1),
+    0 32px 64px -12px rgb(var(--shadow-rgb) / 0.22);
+  font-family: var(--font-body);
+  outline: none;
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+  transition:
+    opacity var(--duration-base) var(--ease-standard),
+    translate var(--duration-enter) var(--ease-spring),
+    scale var(--duration-enter) var(--ease-spring);
+}
+
+.sa-dialog__content[data-starting-style] {
+  opacity: 0;
+  translate: 0 var(--space-3);
+  scale: 0.965;
+}
+
+.sa-dialog__content[data-ending-style] {
+  opacity: 0;
+  translate: 0 var(--space-1);
+  scale: 0.985;
+  transition-duration:
+    var(--duration-fast),
+    var(--duration-fast),
+    var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
+}
+
+/* Destructive tone: a faint error wash at the head of the sheet, nothing heavier. */
+
+.sa-dialog__content[data-tone="destructive"] {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--error) 3.5%, transparent) 0%,
+      transparent 7rem
+    ),
+    var(--surface);
+}
+
+.sa-dialog__content[data-presentation="sheet"] {
+  inset: auto;
+  margin-block: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.sa-dialog__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sa-dialog__title {
+  margin: 0;
+  color: var(--on-surface);
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+.sa-dialog__description {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+  text-wrap: pretty;
+}
+
+/* Footer: recessed sheet tray flush to the panel edges, hairline above. */
+
+.sa-dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin: var(--space-2) calc(var(--sa-dialog-pad) * -1) calc(var(--sa-dialog-pad) * -1);
+  padding: var(--space-4) var(--sa-dialog-pad);
+  border-top: var(--border-width) solid var(--outline-variant);
+  background: var(--surface-low);
+}
+
+:where(.sa-dialog__trigger, .sa-dialog__close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding-inline: var(--control-padding-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--stack-alabaster-raised-bg, var(--secondary-container));
+  color: var(--on-surface);
+  box-shadow: var(--elevation-1);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+:where(.sa-dialog__trigger, .sa-dialog__close):hover:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface), var(--on-surface) calc(var(--state-hover) * 100%)) 0%,
+    color-mix(in srgb, var(--surface-high), var(--on-surface) calc(var(--state-hover) * 100%)) 100%
+  );
+}
+
+:where(.sa-dialog__trigger, .sa-dialog__close):active:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.sa-dialog__trigger, .sa-dialog__close):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+:where(.sa-dialog__trigger, .sa-dialog__close):is(:disabled, [data-disabled], [aria-disabled="true"]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+.sa-dialog__shortcut {
+  color: var(--on-surface-variant);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* Icon close: quiet corner x over the sheet. */
+
+.sa-dialog__close--icon {
+  position: absolute;
+  top: var(--space-4);
+  inset-inline-end: var(--space-4);
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  background: transparent;
+  color: var(--on-surface-variant);
+  box-shadow: none;
+  border-radius: var(--radius-sm);
+}
+
+.sa-dialog__close--icon:hover:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background: rgb(var(--on-surface-rgb) / var(--state-hover));
+  color: var(--on-surface);
+}
+
+.sa-dialog__close--icon:active:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background: rgb(var(--on-surface-rgb) / var(--state-press));
+}
+
+.sa-dialog__content:has(.sa-dialog__close--icon) .sa-dialog__header {
+  padding-inline-end: var(--space-8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-dialog__backdrop,
+  .sa-dialog__content,
+  :where(.sa-dialog__trigger, .sa-dialog__close) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-dialog__backdrop,
+[data-reduce-motion="true"] .sa-dialog__content,
+[data-reduce-motion="true"] :where(.sa-dialog__trigger, .sa-dialog__close) {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-dialog__backdrop {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    opacity: 0.7;
+  }
+
+  .sa-dialog__content {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid CanvasText;
+    box-shadow: none;
+  }
+
+  .sa-dialog__content[data-tone="destructive"] {
+    background: Canvas;
+  }
+
+  .sa-dialog__footer {
+    background: Canvas;
+    border-top-color: CanvasText;
+  }
+
+  :where(.sa-dialog__trigger, .sa-dialog__close) {
+    forced-color-adjust: none;
+    background: ButtonFace;
+    color: ButtonText;
+    border: var(--border-width) solid ButtonText;
+    box-shadow: none;
+  }
+
+  :where(.sa-dialog__trigger, .sa-dialog__close):is(:disabled, [data-disabled], [aria-disabled="true"]) {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sa-dialog__content:focus-visible,
+  :where(.sa-dialog__trigger, .sa-dialog__close):focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}

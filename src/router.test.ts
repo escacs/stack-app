@@ -1,6 +1,6 @@
 // Tests for hash routing (src/router.ts): scenario/route splitting.
 import { describe, expect, it } from 'vitest';
-import { href, parseHash, resolveView } from './router';
+import { href, legacyRedirect, parseHash, resolveView } from './router';
 
 describe('parseHash', () => {
   it('defaults an empty hash to populated + home', () => {
@@ -48,6 +48,13 @@ describe('resolveView', () => {
     expect(resolveView(['project'])).toBe('project');
     expect(resolveView(['browse'])).toBe('browse');
     expect(resolveView(['browse', 'skills', 'file-pr'])).toBe('browse');
+  });
+
+  it('redirects the old presets route into Browse', () => {
+    expect(resolveView(['presets'])).toBe('browse');
+    expect(legacyRedirect(['presets'])).toEqual(['browse', 'presets']);
+    expect(legacyRedirect(['browse', 'presets'])).toBeNull();
+    expect(legacyRedirect(['project'])).toBeNull();
   });
 
   it('keeps the old installed route as a project alias', () => {

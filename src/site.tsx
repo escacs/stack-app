@@ -4,7 +4,9 @@
 // JSX replaces h(), text is auto-escaped, entry links point at app hash
 // routes, and file bodies/images arrive via show --file instead of URLs.
 import type { JSX } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import { KINDS } from './parse';
+import { Icon, type IconName } from './icons';
 import type { EntryLibrary, JsonEntry } from './json';
 
 // ------------------------------------------------------------------ glyphs
@@ -21,26 +23,32 @@ export const SPRITE: Record<string, [string, string]> = {
   worker: ['☻', '☺'], /* taste-skill-ignore: ascii sprite, font-variant-emoji text */
 };
 
-/** Status as a face. */
-export const FACE: Record<string, string> = {
-  stable: '(^_^)',
-  experimental: '(o_O)',
-  deprecated: '(x_x)',
+/** Outline icon per catalog kind (the alabaster look; SPRITE keeps the web's glyph table). */
+const KIND_ICON: Record<string, IconName> = {
+  skill: 'terminal',
+  style: 'palette',
+  system: 'box',
+  component: 'layers',
+  library: 'folder',
+  asset: 'box',
+  template: 'list',
+  worker: 'user',
 };
 
+/** Kind icon; imported (hollow in the web's glyph table) entries render quieter. */
 export function Sprite(props: { kind: string; origin?: string }) {
-  const pair = SPRITE[props.kind] ?? ['·', '·'];
   return (
-    <span class="sp" aria-hidden="true">
-      {props.origin === 'imported' ? pair[1] : pair[0]}
+    <span class={`sp${props.origin === 'imported' ? ' imported' : ''}`} aria-hidden="true">
+      <Icon name={KIND_ICON[props.kind] ?? 'list'} size={15} />
     </span>
   );
 }
 
+/** Status as a quiet pill (stable stays unmarked in rows; the legend shows it). */
 export function Face(props: { status: string }) {
   return (
     <span class={`face ${props.status ?? ''}`} title={props.status}>
-      {FACE[props.status] ?? '(-_-)'}
+      {props.status || 'unknown'}
     </span>
   );
 }
@@ -48,7 +56,7 @@ export function Face(props: { status: string }) {
 const STATUSES = ['stable', 'experimental', 'deprecated'];
 const ORIGINS = ['custom', 'imported'];
 
-/** Home legend: status faces with counts, then origin sprites, like the web. */
+/** Home legend: status and origin counts, one labelled count per line. */
 export function Legend(props: { entries: JsonEntry[] }) {
   const status: Record<string, number> = {};
   const origin: Record<string, number> = {};
@@ -56,17 +64,21 @@ export function Legend(props: { entries: JsonEntry[] }) {
     status[e.status] = (status[e.status] ?? 0) + 1;
     origin[e.origin] = (origin[e.origin] ?? 0) + 1;
   }
-  const key = (mark: JSX.Element, label: string, n: number) => (
-    <span class="key">
-      {mark}
-      <span>{label}</span>
-      <b>{n}</b>
-    </span>
+  const group = (title: string, keys: string[], counts: Record<string, number>, tone: boolean) => (
+    <div class="legend__group" role="group" aria-label={title}>
+      <span class="legend__title">{title}</span>
+      {keys.map((k) => (
+        <span class="legend__item">
+          <span class={tone ? `legend__key face ${k}` : 'legend__key'}>{k}</span>
+          <span class="legend__n">{counts[k] ?? 0}</span>
+        </span>
+      ))}
+    </div>
   );
   return (
     <div class="legend">
-      <div>{STATUSES.map((st) => key(<Face status={st} />, st, status[st] ?? 0))}</div>
-      <div>{ORIGINS.map((o) => key(<Sprite kind="skill" origin={o} />, o, origin[o] ?? 0))}</div>
+      {group('Status', STATUSES, status, true)}
+      {group('Origin', ORIGINS, origin, false)}
     </div>
   );
 }
@@ -75,16 +87,6 @@ export function Legend(props: { entries: JsonEntry[] }) {
 export function barCells(n: number, max: number, cells = 20): { on: number; off: number } {
   const on = n ? Math.max(1, Math.round((n / Math.max(max, 1)) * cells)) : 0;
   return { on, off: cells - on };
-}
-
-export function Bar(props: { n: number; max: number }) {
-  const c = barCells(props.n, props.max);
-  return (
-    <span class="bar" aria-hidden="true">
-      <span class="on">{'█'.repeat(c.on)}</span>
-      <span class="off">{'·'.repeat(c.off)}</span>
-    </span>
-  );
 }
 
 export const IMG_RE = /\.(png|jpe?g|gif|webp|avif|svg|ico)$/i;
@@ -485,17 +487,10 @@ export function Markdown(props: {
       } else if ((m = l.match(/^(#{1,6})\s+(.*?)\s*#*$/))) {
         const level = Math.min(m[1]?.length ?? 1, 4);
         const kids = inline(m[2] ?? '');
-        out.push(
-          level === 1 ? (
-            <h1>{kids}</h1>
-          ) : level === 2 ? (
-            <h2>{kids}</h2>
-          ) : level === 3 ? (
-            <h3>{kids}</h3>
-          ) : (
-            <h4>{kids}</h4>
-          ),
-        );
+        // The page owns h1 (the entry title) and h2 (its sections), so doc headings sit two levels
+        // down; data-lv keeps the look of the heading the author wrote.
+        const H = (['h3', 'h4', 'h5', 'h6'] as const)[level - 1] ?? 'h6';
+        out.push(<Dynamic component={H} data-lv={level}>{kids}</Dynamic>);
         i++;
       } else if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(l)) {
         out.push(<hr />);

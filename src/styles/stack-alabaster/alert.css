@@ -1,0 +1,137 @@
+/* stack-alabaster alert: crisp neutral Mac Alabaster callout card.
+   White surface + hairline ring; semantic tone lives only in a 3px accent
+   bar and the 16px icon tint. Styled strictly through systems/design-tokens. */
+
+.sa-alert {
+  --sa-alert-tone: var(--on-surface-variant);
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--outline-variant);
+  border-radius: var(--radius-card);
+  background-color: var(--surface);
+  box-shadow:
+    inset 0 1px 0 rgb(var(--on-inverse-surface-rgb) / 0.96),
+    0 1px 2px rgb(var(--shadow-rgb) / 0.05);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--on-surface);
+}
+
+/* Crisp 3px semantic accent bar (same craft as Toast); neutral stays bare. */
+
+.sa-alert::before {
+  content: "";
+  align-self: stretch;
+  flex: none;
+  width: 3px;
+  min-height: var(--space-4);
+  border-radius: var(--radius-full);
+  background-color: var(--sa-alert-tone);
+}
+
+.sa-alert__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-top: calc((var(--line-height-normal) * 1em - var(--space-4)) / 2);
+  color: var(--sa-alert-tone);
+}
+
+.sa-alert__icon svg {
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+.sa-alert__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  min-width: 0;
+}
+
+.sa-alert__title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--on-surface);
+}
+
+.sa-alert__description {
+  color: var(--on-surface-variant);
+}
+
+.sa-alert__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  align-self: center;
+}
+
+/* Tones: semantic colour appears only as the accent bar and icon tint.
+   The card itself stays on the neutral alabaster ramp. */
+
+.sa-alert--neutral::before {
+  display: none;
+}
+
+.sa-alert--info {
+  --sa-alert-tone: var(--info);
+}
+
+.sa-alert--success {
+  --sa-alert-tone: var(--success);
+}
+
+.sa-alert--warning {
+  --sa-alert-tone: var(--warning);
+}
+
+.sa-alert--error {
+  --sa-alert-tone: var(--error);
+  border-color: color-mix(in srgb, var(--error) 30%, var(--outline-variant));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-alert {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-alert {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .sa-alert {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid CanvasText;
+    box-shadow: none;
+  }
+
+  .sa-alert::before {
+    background-color: Highlight;
+  }
+
+  .sa-alert--warning,
+  .sa-alert--error {
+    border-color: Highlight;
+  }
+
+  .sa-alert__icon,
+  .sa-alert__title,
+  .sa-alert__description {
+    color: CanvasText;
+  }
+}

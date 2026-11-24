@@ -1,0 +1,214 @@
+/* stack-alabaster nav-item: sidebar source-list row distinguishing inspected
+   selection (`selected` white pill) from active worktree (`target` recessed well).
+   Styled strictly through systems/design-tokens + --stack-alabaster-* extras. */
+
+.sa-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--control-height-lg);
+  padding-inline: calc(var(--space-2) + 2px);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--on-surface);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-tight);
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+/* Leading 20x20px icon box. */
+
+.sa-nav-item__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+  color: var(--on-surface-variant);
+}
+
+.sa-nav-item__icon svg {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+}
+
+.sa-nav-item--tone-warning .sa-nav-item__icon {
+  color: var(--warning);
+}
+
+.sa-nav-item--tone-success .sa-nav-item__icon {
+  color: var(--success);
+}
+
+.sa-nav-item--tone-info .sa-nav-item__icon {
+  color: var(--info);
+}
+
+.sa-nav-item--selected.sa-nav-item--tone-default .sa-nav-item__icon {
+  color: var(--on-surface);
+}
+
+/* Truncated label (stays --on-surface even in target state). */
+
+.sa-nav-item__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--on-surface);
+}
+
+.sa-nav-item__meta {
+  flex: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surface-variant);
+}
+
+.sa-nav-item__badge {
+  flex: none;
+}
+
+/* State: default (transparent row with hover wash). */
+
+.sa-nav-item--default:hover:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-hover));
+}
+
+.sa-nav-item--default:active:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background-color: rgb(var(--on-surface-rgb) / var(--state-press));
+  transform: scale(var(--press-scale));
+}
+
+/* State: selected (elevated white pill for currently inspected entry/kind). */
+
+.sa-nav-item--selected {
+  background-color: var(--surface);
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(--stack-alabaster-selected-pill-shadow, var(--elevation-1));
+}
+
+.sa-nav-item--selected:active:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  transform: scale(var(--press-scale));
+}
+
+/* State: target (recessed well + --info leading icon + Target badge; label stays --on-surface bold). */
+
+.sa-nav-item--target {
+  background-color: var(
+    --stack-alabaster-target-well-bg,
+    rgb(var(--primary-rgb) / var(--state-selected))
+  );
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(
+    --stack-alabaster-target-well-shadow,
+    var(--stack-alabaster-well-recess, var(--elevation-0))
+  );
+}
+
+.sa-nav-item--target .sa-nav-item__icon {
+  color: var(--info);
+}
+
+.sa-nav-item--target .sa-nav-item__label {
+  color: var(--on-surface);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sa-nav-item--target:hover:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  background-color: color-mix(
+    in srgb,
+    var(
+      --stack-alabaster-target-well-bg,
+      rgb(var(--primary-rgb) / var(--state-selected))
+    ),
+    var(--on-surface) calc(var(--state-hover) * 100%)
+  );
+}
+
+.sa-nav-item--target:active:not(:disabled):not([data-disabled]):not([aria-disabled="true"]) {
+  transform: scale(var(--press-scale));
+}
+
+/* Focus & disabled. */
+
+.sa-nav-item:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sa-nav-item:is(:disabled, [data-disabled], [aria-disabled="true"]) {
+  opacity: var(--state-disabled-opacity);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-nav-item {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-reduce-motion="true"] .sa-nav-item {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+
+
+  .sa-nav-item__label,
+  .sa-nav-item__meta,
+  .sa-nav-item__icon {
+    color: CanvasText;
+  }
+
+  .sa-nav-item {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border: var(--border-width) solid transparent;
+    box-shadow: none;
+  }
+
+  .sa-nav-item--selected {
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+
+  .sa-nav-item--selected .sa-nav-item__label,
+  .sa-nav-item--selected .sa-nav-item__meta,
+  .sa-nav-item--selected .sa-nav-item__icon {
+    color: HighlightText;
+  }
+
+  .sa-nav-item--target {
+    border-color: CanvasText;
+  }
+
+  .sa-nav-item:is(:disabled, [data-disabled], [aria-disabled="true"]) {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sa-nav-item:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid Highlight;
+  }
+}
