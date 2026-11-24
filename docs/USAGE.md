@@ -43,6 +43,24 @@ open → choose who → choose project → project page + browse
 If no usable stack checkout is found, the setup screen comes first.
 See [stack checkout](#stack-checkout).
 
+Both answers are remembered. On the next launch the app opens straight into the
+shell on the last route; a question only comes back for what is missing (the
+worker is no longer in the stack, or the project folder is gone). To change
+either, click the project or user half of the pill in the title bar (a small
+menu offers recents, workers and "Switch…") or run **Switch project / Switch
+worker** from the palette; Esc keeps what was set.
+
+### Command palette, toasts and shortcuts
+
+`Cmd/Ctrl+K` (or the **Commands** button in the title bar) opens the command
+palette: type to filter, arrows and Enter to run, Esc to close. Commands that
+cannot run right now stay listed, dimmed, with the reason. `?` lists every
+shortcut; `/` still searches the catalog. Every change (import, remove,
+update, sync, preset, retarget) shows a toast with the outcome; imports,
+removes of clean rows, presets and retargets add **Undo**. Update, sync, init
+and adopt have no true inverse, so their toasts carry no Undo. Removing,
+updating or bulk-updating a row with local edits asks for confirmation first.
+
 ### who
 
 Lists the workers in the stack (its `worker` entries). Pick one.
@@ -62,7 +80,7 @@ who?
 | `Enter` | pick the row under the cursor |
 | `1`–`9` | pick that row at once |
 
-If the stack lists no workers, the screen shows `(._.) none` and
+If the stack lists no workers, the screen shows `none` and
 `continue without one`. If the list fails, it shows the error with `retry`
 and `continue without one`. Skipping lasts for this session only.
 
@@ -143,338 +161,236 @@ appears next to `re-check` and forgets it, back to the automatic lookup.
 This screen is the only place that names the stack folder; everywhere else
 it hides behind the version's tooltip in the footer.
 
-### Top bar and footer
+### Title bar and sidebar
 
-```
-project / browse                        mel  …/projects/folio
-```
+The title bar is the window frame (the OS frame is off): traffic-light
+close, minimize and maximize buttons, the `stack` name, and, once first run
+is done:
 
-- `project` and `browse` switch views. The current one is marked. `project`
-  is the default: opening a project lands there.
-- While an operation runs, its name and `…` appear before the user name.
-- `(x_x)` appears when node is not usable. Hover it for the message.
-- The user and project buttons go back to who and project (see above).
+- **Project | Browse | Presets** in the centre switch views. The current one
+  is raised. Opening a project lands on Project.
+- On the right: a **Search** button (shown on every view except Browse, which
+  has its own field; `/` does the same), the project and user split button
+  (each half goes back to its first-run question), a `node missing` badge
+  when node is not usable, and the **theme** button, which toggles light and
+  dark. The choice is remembered on this machine; until you pick one the
+  theme follows the system.
+- While an operation runs, its name and `…` appear before the search.
 
-Footer, bottom of the window, one quiet line: the app version, then
-`check for updates`, then `N import update` or `N import updates` when
-project imports have changes waiting. The update count opens the project page; the version's
-tooltip names the stack checkout in use and where it came from
-(settings, env or auto). The updater stays on that same line: `checking…`,
-`up to date` (fades back to the link), `→ <version> available [install]`,
-download progress, `[relaunch]`. A newer release found by the startup check
-shows the same `→ <version> available [install]` without clicking. Errors
-show short and dim with the full text in a tooltip, plus `[retry]`. All of
-it lives here because it is about the app, not the project.
+The left sidebar lists the catalog kinds with counts on Browse, and the
+project's tracked imports with their state on Project and Presets. Under it,
+**Branches & worktrees** lists the project's git worktrees; the active
+target is marked `Target`, and a click on another one retargets the app.
+Narrow windows (under about 720px) fold the sidebar to a scrolling strip
+of the first group.
 
-Any other route shows `(o_O) not found`.
+The footer card at the bottom of the sidebar holds the app version and the
+updater: `check for updates`, `checking…`, `up to date`, `<version>
+available` with an install button, download progress, then relaunch.
+Errors show short with the full text in a tooltip, plus retry. A line above
+the card shows `N import updates` when project imports have changes waiting.
+The version's tooltip names the stack checkout in use and where it came from
+(settings, env or auto).
+
+Any other route shows `not found`.
 
 ## 4. Browse
 
-Browse is the stack's catalog, on its own screen. The prompt line shows
-where you are — the trail starts at the catalog name — and the search box
-follows it, with a quiet `[refresh]` at the line's right end.
+Browse is the stack's catalog as a **list** on the left and a **live preview**
+on the right. The list has a **Search entries** field, a **refresh** button,
+filter chips, a sort menu and one row per entry. The preview shows the entry
+under the list cursor and follows it as you move (`j` `k`, arrows, a click):
+nothing navigates. Nothing is focused when Browse opens: press `/` to search,
+`Escape` to leave the field. Letters you type in the field are only text; the
+single-key shortcuts below work everywhere else.
 
-```
-stack/skills/file-pr  ›  type to search  [refresh]
-```
+**refresh** (or `r`) re-reads the catalog from the stack checkout from
+scratch, after the checkout changed out from under the app (a `git pull`, a
+new skill, updated remotes), without restarting. It keeps the route, then says
+`refreshed · 93 entries` (or shows the error inline, keeping the stale list).
+It stays disabled while an import runs.
 
-`[refresh]` (or `r`) re-reads the catalog from the stack checkout from
-scratch, after the checkout changed out from under the app — a `git pull`
-in the stack, a new skill, updated remotes — without restarting. It keeps
-the current route and scroll position, then says `refreshed · 93 entries`
-(or shows the error inline, keeping the stale list). It stays disabled
-while an import runs.
+### The list
 
-### Home
+Each row shows the kind icon, the name over its one-line summary (search
+matches are marked), the library or kind in small type, an `Imported` chip
+when this project has it, a status chip (`stable`, `experimental`,
+`deprecated`), and the file count and size. A `Not in stack` (red) or
+`Stack edits` (amber) status may follow the name (see [import](#import)).
+The list is a single listbox: `Tab` reaches it, the cursor row is announced
+as the active option, and the preview is announced once when you pause (not
+on every key).
 
-```
-stack ›
+- **Filter chips** — `Stable`, `Experimental`, `Custom` (the entry's origin in
+  the stack), `Imported` and `Not imported` (this project). Each shows how many
+  entries it would keep. Chips of the same kind widen each other (Stable +
+  Experimental shows both); different kinds narrow (Stable + Custom).
+- **Sort** — `Name`, `Size` (largest first), `Status` (stable first) or
+  `Recently imported` (entries this app imported, newest first). While you
+  search, results stay in relevance order and the menu is disabled.
+- **Search** — `/` focuses the field. A search matches substrings of the name,
+  tags, id, summary and targets, across the list in view. Words are matched
+  separately; more matches rank higher, a name match counts most. `Escape`
+  leaves the field and keeps the text; a second `Escape` clears it.
+- **Kinds** — the sidebar's *Catalog kinds* narrow the list to one kind (a
+  `Showing skills only · Show all kinds` line says so). A link to an entry
+  (`#…/browse/skills/file-pr`) selects it among its kind; one that matches
+  nothing says so and offers the whole catalog.
+- **Import all N** above the list imports every not-imported entry in view
+  (see [batch import](#batch-import)).
 
-★ skills        ████████████████████   3
-● styles        ███████·············   1
-■ systems       ███████·············   1
-◆ components    █████████████·······   2
-▶ libraries     ███████·············   1
-♥ assets        ███████·············   1
-▲ templates     ███████·············   1
-☻ workers       █████████████·······   2
-~ all                                 12
+Empty, loading and error states are styled: a skeleton while the catalog
+loads, `No entries match …` with **Clear filters**, and a retry on failure
+(with the stale list kept when there is one).
 
-(^_^) stable 6   (o_O) experimental 6   (x_x) deprecated 0
-★ custom 12      ☆ imported 0
-```
+### The preview
 
-Each kind row opens that kind. `all` lists every entry.
+The preview is the entry card: a crumb line (kind, file count, and the target
+branch while not imported), the title with its status chip, the summary, and
+**Dry run** and **Import to &lt;branch&gt;** at the top right (or an
+`Imported → <path>` pill once this project has it). Below:
 
-The sprite marks the kind: `★` skill, `●` style, `■` system, `◆` component,
-`▶` library, `♥` asset, `▲` template, `☻` worker. A filled sprite means the
-entry's origin is `custom`, a hollow one means `imported`. That is the
-entry's origin in the stack, not what your project imported.
-
-### Kind views
-
-```
-stack/skills ›
-
-★ file-pr      (^_^)  2f 219b
-★ ponytail     (o_O)  2f 219b
-```
-
-Each row shows the name, the status face, and the file count and size. A
-`not-committed` or `uncommitted-in-stack` marker may follow the name (see
-[import](#import)). Components are grouped by library, as
-`components/react`, with a member count and `default` if it is the default
-library.
-
-Every entry row carries a quiet `[import]` button at its right end. It
-is always shown, dim while idle, and brightens while the row is hovered,
-focused or under the cursor. One click imports with the default
-destination, without leaving the list. Rows this project already imported
-show `(imported)` instead; rows that cannot be imported (`not-committed`)
-show nothing. A dim key line under each list names the list keys.
-
-Above every kind list, and in every component library heading, an
-`[import all N]` button imports the whole list at once (see
-[batch import](#batch-import)). Search results get multi-select but no
-import-all.
-
-### all
-
-Every entry, in kind order. Rows show full ids (`skills/file-pr`).
-
-### Search
-
-Type anywhere: the first letter focuses the search box. A search matches
-substrings of the name, tags, id, summary and targets, across all kinds.
-Words are matched separately. An entry needs at least one match, and more
-matches rank it higher. A name match counts most.
-
-```
-stack › pr
-
-★ skills/file-pr       (^_^)  2f 219b
-▲ templates/agents-md  (^_^)  4f 451b      ← "project" in the summary
-```
-
-Search runs in the app over the catalog list; it does not call the CLI's
-`search`.
-
-### Entry page
-
-```
-★ ponytail  (o_O)
-
-Lazy senior dev mode: the smallest change that fully solves the task.
-
-usage    link
-size     2 files, 219b
-targets  any
-tags     ponytail, fixture
-
-files
-ponytail/
-├─ README.md  109b
-└─ stack.json 110b
-```
-
-From top to bottom, the page shows:
-
-1. Title, status face and the summary.
-2. `not committed in the stack: can't import` when the entry is not in the
+1. `Not in the stack, so it can't be imported` when the entry is not in the
    stack's HEAD commit.
-3. `imported → <path>` when this project already imported it.
-4. Details: usage, size, targets, tags, `requires`, `related`, `cited by`
-   and `upstream` (source URL, ref, license, `modified`) when present.
-5. The import row, when the entry is committed and not imported yet.
-6. The result of the last import or a refusal.
-7. Up to four image previews.
-8. The file tree, then the open file.
+2. **Overview | Files (N)**, with the size and `in stack` (or `not in stack`) on the right.
+   Overview shows the facts (Destination, Usage, Targets, Tags, Requires,
+   Related, Cited by, Upstream) and the doc excerpt. Files shows up to four
+   image previews, the file tree and the open file.
+3. At the bottom, pinned, the
+   [T3 Code tray](#t3-code-branches-and-thread-injection) when T3 Code is
+   available.
+
+`Enter` moves focus into the preview; `Escape` returns to the list. Under 900px
+wide the preview becomes a full-screen detail with **Back to list**.
 
 ### Files and docs
 
-Click a file in the tree, or move to it with the arrows and press `Enter`.
-Its body appears under its path:
+Click a file in the tree. Its body appears under its path:
 
-- Markdown is rendered. Links to other entries open in the app. External
-  links open in a browser window.
+- Markdown is rendered. Links to other entries select them in the list.
+  External links open in a browser window.
 - Other text files are shown as they are.
 - Images are shown inline.
 - Binary files show their size and `binary … — open it from the checkout.`
 
 ### Import
 
-```
-import
-[--to                    ]  [import]
-```
+**Import**, **Dry run**, the `i` key, the palette's *Preview import plan* and
+Cmd/Ctrl+Enter all open the same **import plan** in the preview, and nothing
+is written until you press **Import** there. The plan shows exactly what an
+import would do:
 
-- Leave `--to` empty and the CLI chooses the place. Skills and styles go to
-  `.agents/skills/<name>`, with a `.claude/skills` link. Other entries go to
-  `.stack/<id>`. Components go to `.stack/components/<library>/<name>`.
-- Fill `--to` with a folder inside the project, such as `src/components/ui`.
-  Absolute paths and paths that leave the project are refused, including
-  through symlinks.
-- An import writes nothing if a target file already exists with different
-  content. The app then shows the files and says so:
+- the files as a compact folder tree, grouped by folder, with a marker and a
+  size on each: `+` a new file, `!` a file that already exists with different
+  content (a collision), `~` a file that would be overwritten. The markers are
+  a glyph and a spoken label, not colour alone. The `~` marker is part of the
+  plan format but the stack's dry run does not report overwrites, so it does not
+  appear today;
+- where each entry goes in plain words (`into .agents/skills/taste-skill`,
+  `into the project root`), including entries pulled in by `requires`
+  (`needed by …`);
+- a `.gitignore` line when the managed block would change, and the entries
+  that are already imported;
+- a collision as `2 files already exist at .agents/skills/x — choose another
+  folder or keep them`. **Import** stays disabled until the folder is changed.
 
-  ```
-  untracked look-alikes, nothing written:
+The **Destination folder** field is in the plan: leave it empty for the default
+(skills and styles go to `.agents/skills/<name>` with a `.claude/skills` link,
+other entries to `.stack/<id>`, components to
+`.stack/components/<library>/<name>`), or type a folder inside the project such
+as `src/components/ui`. Entries that belong in the source tree (components and
+other `copy` entries) open the plan with the convention filled in
+(`src/components/button`) and need a folder before **Import** is available.
+Absolute paths and paths that leave the project are refused. Editing the folder
+re-runs the plan.
 
-  .agents/skills/file-pr/SKILL.md
-  .agents/skills/file-pr/helpers.mjs
-  ```
+**Import** writes, closes the plan, shows a toast with **Undo**, and the row
+flips to `Imported`. Moving the cursor to another entry, `Escape` or **Cancel**
+closes the plan without writing. A failed import keeps the plan open with the
+reason in plain words.
 
-  Move those files, pick another `--to`, or delete them if they are yours to
-  drop. A file with identical content is not a conflict.
-- An entry that is not in the stack's HEAD commit cannot be imported.
-  Commit it in the stack checkout first.
-- `uncommitted-in-stack` means the stack's working tree has changes for the
+- An entry that is not in the stack's HEAD commit cannot be imported. Commit it
+  in the stack checkout first.
+- `Stack edits` means the stack's working tree has uncommitted edits for the
   entry. Imports read the committed version, not the working tree.
-- Each import is recorded in `stack.toml`. A successful import lists what
-  landed:
-
-  ```
-  imported 1 entry
-
-  skills/ponytail → vendored/ponytail
-  ```
-
-  Entries pulled in by `requires` show `(required by …)`. Entries already
-  here show under `already here`. A `.gitignore` line shows when the managed
-  block changed.
-
-The same import runs straight from any entry row in a list: kind views,
-search results, `all`, and component library groups. While it runs the
-row reads `working`; on success the row flips to `(imported)` and a
-one-line result appears under it for a few seconds:
-
-```
-★ ponytail     (o_O)  2f 219b                   (imported)
-   imported → .agents/skills/ponytail
-```
-
-A click on that line expands the full import log. Pulled-in dependencies
-are mentioned briefly (`+1 dep`). On failure the short error shows
-instead, with a `[details]` button for the full error or the look-alike
-list. When a skill or style is refused for look-alikes, the same inline
-`to:` field opens under the error, prefilled with the default destination,
-so another destination can be chosen right there. Only one import runs at
-a time.
-
-Entries that belong in the source tree — components and other `copy`
-entries — are never imported blindly: their row button opens a small
-inline field on the row itself, prefilled with the convention
-(`src/components/button` for components) when there is one:
-
-```
-◆ button       (o_O)  2f 219b                     [import]
-   to: [src/components/ui  ]  [import]  esc
-```
-
-`Enter` imports there, `Escape` (or `esc`) closes the field. The entry
-page's import section keeps working as before, including an empty `--to`
-for the CLI default.
+- Each import is recorded in `stack.toml`.
 
 ### Batch import
 
 Two ways to import several entries at once:
 
-- `[import all N]` above a kind list, or in a component library heading,
-  imports every not-imported entry below it. `N` counts what would be
-  attempted; already-imported and `not-committed` rows are left out.
-- Multi-select: press the gutter at a row's left end (or `Space` on the
-  cursor row) and more rows — `Shift`-click and `Ctrl`-click work on the
-  rows too, `Shift`+arrows extend from the keyboard (`Ctrl`+`Shift`+arrows
-  extend additively), and a gutter press can be dragged across rows.
-  Selected rows carry a `*` in the gutter.
-  `a` selects every not-imported row in the list (whenever a list is
-  showing, no cursor needed — except while typing in a text field). A
-  quiet `N selected [import] [clear]` bar sits under the prompt while
-  anything is selected.
+- **import all N** above the list imports every not-imported entry in view.
+  `N` counts what would be attempted; already-imported and `not-committed`
+  rows are left out.
+- Select rows the way a file manager does, with no separate mode. A click
+  selects only that row; `Ctrl`/`Cmd`-click adds or removes one; `Shift`-click
+  selects the range from the last row clicked (`Ctrl`+`Shift` adds the range).
+  From the keyboard, `↑` `↓` select the row they land on, `Shift`+`↑` `↓`
+  extend, `Ctrl`+`↑` `↓` move without selecting, `Space` toggles the cursor
+  row and `a` or `Ctrl`+`A` select every not-imported row in view. Folder
+  rows select their components. Two or more selected rows turn the filter row
+  into `N selected`, **Import N** and **Clear** (`Esc` also clears); one
+  selected row is just highlighted and uses its own **Import**. The selection
+  is dropped when you change kind, library or search.
 
-Either way, more than one entry gets a dry-run confirm line first —
-nothing is written until it is confirmed:
+More than one entry opens one combined plan in the preview: every entry's
+files, the shared **folder for entries that need one** (each lands in
+`<folder>/<name>`, `src/components` for component batches), entries that will be
+skipped and why (a collision, `not-committed`, a failed check), and
+**Import N**, which counts only what will really be written. Entries with
+collisions are left out up front instead of being refused one by one.
 
-```
-components/batch: import 7 · 1 would collide [details] to: [src/components] [import] [cancel]
-```
-
-The line names the count, entries that would collide (dry-run first, so
-conflicts show before anything is written), and entries skipped
-(already here, `not-committed`). Entries needing a destination share one
-`to:` base — each lands in `<base>/<name>` — prefilled with
-`src/components` for component batches; empty skips them. One entry
-imports straight away, like its row button.
-
-The run imports the entries one at a time, with each result inline on
-its row, and ends with one summary line:
-
-```
-components/batch: imported 6 · 1 refused [details]
-```
-
-`[details]` lists every refusal with its look-alike files or error.
-`[cancel]` stops after the current entry. Only one import — row or
-batch — runs at a time.
+The run imports the entries one at a time and ends with one summary
+(`imported 6 · 1 skipped`) and one toast with **Undo** for everything that
+landed. **details** lists every refusal; **x** dismisses it. **cancel** stops
+after the current entry. Only one import runs at a time.
 
 ### Keys in Browse
 
 | key | does |
 |---|---|
-| `↑` `↓` | move the cursor over rows: home rows, list rows, file tree |
-| `Shift`+`↑` `↓` | extend the selection from the anchor row (lists only) |
-| `Enter` | open the cursor row. With a search and no cursor, open the first result |
-| `i` | import the cursor row in place (lists only; never inside a text field) |
-| `Space` | select the cursor row (lists only). With no cursor row, scroll down about 80% of a page when the search box is empty |
-| `a` | select every not-imported row in the list (needs the cursor on the list, like `i`; otherwise types into the search) |
-| `r` | refresh the catalog from the stack checkout (never inside a text field) |
-| `Escape` | cancel a batch confirm or run, dismiss a summary, clear the selection, clear the search, or go up one level, in that order |
-| letter or digit | focus the search box and type into it |
+| `/` | focus the search field (from any view) |
+| `↑` `↓` or `j` `k` | move the list cursor and select that row; the preview follows |
+| `Shift`+`↑` `↓` | extend the selection from the anchor row |
+| `Ctrl`+`↑` `↓` | move the cursor without changing the selection |
+| `Home` `End` | first / last row |
+| `Enter` | open the cursor row (an entry's detail, or a folder) |
+| `i` | open the import plan for the selection (2+ rows) or the cursor row |
+| `Space` | add or remove the cursor row. With no list, scroll down about 80% of a page |
+| `a`, `Ctrl`+`A` | select every not-imported row in view |
+| `r` | refresh the catalog from the stack checkout |
+| `Escape` | in the search field: leave it. Elsewhere, in order: close an open plan or batch, dismiss a summary, clear the selection, close the detail, clear the search, or move from the preview back to the list |
 
-Clicking a row or link does the same as moving to it and pressing `Enter`.
-`j` and `k` are not bound in browse.
+Only `↑` `↓`, `Enter` and `Escape` act while the search field has focus; every
+other key, space included, is typed into it. The same goes for the destination
+fields. The palette adds *Clear Browse filters* and *Change Browse sort order*.
 
 ## 5. Project page
 
-Everything about the open project: the set-up slot, what this project
-imported from the stack, and presets. It needs a project. The old
-`installed` route still opens this page, as an alias.
+The Project route covers the open project: the set-up slot, what this
+project imported from the stack, worktrees and T3 threads. It needs a
+project. The old `installed` route still opens this page, as an alias. A
+header gives the project name, its path, the import count and the stack
+commit the lock was last synced to, with **Sync missing** (and **Merge all
+upstream** when imports have updates).
 
-```
-[init stack.toml]                         ← only without stack.toml
+- The set-up slot: **init stack.toml** when the project has no `stack.toml`.
+- `found in project`: folders that look like entries that were never
+  imported, each with an **adopt** button, and **adopt a folder…** for the
+  rest.
+- **Imports**: one row per import: id, `@commit → path` (`project root` for a
+  root template), its state word (`Synced`, `Update`, `Edited`, `Gone`) and
+  **Merge upstream** (when the stack has newer content). **Review changes** and
+  **Remove** appear on hover or focus without moving anything. **T3 threads**
+  use the same columns, with `Target` in blue and **Set as target**.
+  Rows with changes show a sub-line (`2 files changed upstream`,
+  `edited: SKILL.md`, `removed from stack`).
+- **Worktrees** and **T3 threads**, each with a **target** button to retarget
+  the app, and **sync all worktrees** and **refresh** buttons.
 
-found in project: 1 look-alike entry     ← only when folders look like entries
-.agents/skills/ponytail → skills/ponytail (identical)  adopt
-adopt a folder…
-
-          skills/file-pr        @b51359b → .agents/skills/file-pr        remove
-          styles/folio-light    @b51359b → .agents/skills/folio-light    remove
-          workers/mel           @b51359b → .stack/workers/mel            remove
-
-sync stack @b51359b
-
-presets 2
-web   React starter: button plus the file-pr skill. . . .  all here   preview apply
-docs  Docs setup: conventions plus the agents-md scaffold. . .  2 new   preview apply
-```
-
-The app version and updater live in the footer line, not on this page
-(see [top bar and footer](#top-bar-and-footer)).
-
-Rows with upstream changes look like this:
-
-```
-update    skills/file-pr        @a1b2c3d → .agents/skills/file-pr        update  remove
-          2 files changed upstream
-          edited: SKILL.md
-
-update    templates/agents-md   @a1b2c3d → .                             update  remove
-          1 file changed upstream
-
-update all   sync stack @b51359b
-```
-
-The `@…` value is the stack commit the import was made from.
+Every action button sits in one right-aligned column. The app version and
+updater live in the sidebar footer (see
+[title bar and sidebar](#title-bar-and-sidebar)).
 
 ### Row states
 
@@ -488,21 +404,23 @@ The `@…` value is the stack commit the import was made from.
 Clean rows leave the marker slot blank; only rows needing attention print
 one, the first matching state in this order: `gone`, `update`, `edited`.
 A row can be `update` and still list `edited:` files.
-A deleted file counts as edited; `sync` restores it.
+A deleted file is listed in the row's `missing` (the CLI's `status --json` sends it; for an older CLI the app checks the file on disk); `restore` brings it back.
 
 ### Actions
 
 | control | shows when | does | does not |
 |---|---|---|---|
-| `update` | row is `update` | three-way merge of the row's files to the stack's HEAD. Overlapping edits get `<<<<<<<` markers, and the file is listed under `conflicts` | does not drop your edits; does not run for `gone` rows |
-| `update all` | any row is `update` | the same for every row | |
+| `review changes` | the row has upstream changes or local edits | opens a diff of each changed file under the row (see [Review changes](#review-changes)). Writes nothing | |
+| `merge upstream` | row is `Update` | three-way merge of the row's files to the stack's HEAD. Overlapping edits get `<<<<<<<` markers, and the file is listed under `conflicts`. A row only upstream changed updates at once with a toast; a row **both** sides changed reads `review & merge` until its diff has been opened, then asks to confirm | does not drop your edits; does not run for `gone` rows |
+| `merge all upstream` | any row is `Update` | the same for every row. If rows both sides changed have not been reviewed it opens their diffs and stops, with a toast; once reviewed it asks to confirm | |
 | `remove` | every row | deletes the import's unedited files and its entry in `stack.toml` | does not delete edited files; they are listed as `kept (edited here)` |
-| `sync` | any row | restores imported files that are missing, at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
+| `restore <id>` | the entry has missing files | restores only that entry's missing files (`stack restore <id>`), at the commit recorded in `stack.toml` | never overwrites an edit; does not move to newer content (that is `update`) |
+| `restore` | any row has missing files | the same for every entry (`stack restore`, no ids); the project summary and the palette run this | |
+| per-file choice | a file both sides changed | under the file's header: **Keep mine** (`--keep-mine`), **Take upstream** (`--take-upstream`; yours is saved as `<file>.mine`) or **Merge (conflict markers)**, the default. **Preview** runs `update <id> --dry-run` with the choices and lists each file's outcome; **Update** runs it for real. The conflict-marker warning shows only while a file is still on Merge | `merge all upstream` keeps the default and its confirm says both-sides files get markers unless resolved per entry |
 | `init stack.toml` | no rows, and no `stack.toml` in the project. Shows at the top, in the set-up slot: one line, with the explanation in its hover text | creates `stack.toml` and the managed `.gitignore` block. A legacy `stack.lock.json` is migrated and removed | imports nothing |
 | `adopt` (one button per found folder) | a project folder looks like an entry that was never imported | records the folder's files in `stack.toml`: the same import as Browse, with the destination implied | differing files are listed and nothing is written |
 | `adopt a folder…` | always | the manual fallback: a folder picker starting in the project. The entry is inferred from the folder name; several matches offer a choice, no match offers an entry-id field (autocompleted from the catalog) as the last resort | differing files are listed and nothing is written; a folder outside the project is refused |
-| preset `preview` | a preset exists | dry run: lists what would land where and what is already here. Writes nothing | |
-| preset `apply` | a preset exists | imports every row of that preset, each with its `--to` | refuses like import when files differ |
+| preset `plan` / `apply` | a preset exists | both open the preset's import plan (the same file tree as Browse). **Apply** in the plan imports every row of the preset, each with its own folder; nothing is written before | collisions block **Apply** and are listed |
 
 Next to the set-up slot, `found in project: N look-alike entries` lists
 folders that look like stack entries but were never imported: a skills
@@ -522,24 +440,43 @@ action shows the CLI's error text as it is. Only one action runs at a time;
 the other buttons are disabled meanwhile. Every action re-reads the rows when
 it ends.
 
+### Review changes
+
+**review changes** on a row shows, per changed file, a unified diff with line
+numbers on both sides and a `+` / `−` column (spoken by screen readers, not
+colour alone). Long unchanged runs fold behind **Show N unchanged lines**; long
+lines scroll inside the diff only. The labels say which side changed:
+`Upstream changed 2 files`, `You edited SKILL.md`, and when both did,
+`Both sides changed — review first` with a warning that updating may overwrite
+or conflict with your edits.
+
+What the diff compares: the installed file against the stack's current copy.
+The stack records only a hash of each file as imported, not its text, so a true
+three-way diff is not available. For a file only upstream changed, the diff is
+exactly what an update adds. For a file only you edited, it is your edits
+against the (unchanged) stack copy. For a file both sides changed, it mixes the
+two (your edits show as removed lines), and the panel says so. New upstream files
+show as all-added, and files the stack dropped as all-removed.
+
 ### Presets
 
-Presets are named import plans. The stack defines them in its
-`presets/*.toml` files. The heading carries the count (`presets 12`). Each
-row is one preset on one line: its name, description (cut to fit; hover for
-the full text), compact counts against the lock (`M new`, or `all here`;
-`· N dep` once a preview has named auto-imported dependencies; hover for the
-long form), and two buttons. `preview` runs a `--dry-run` apply and unfolds a
-tree right under the row: one `id → path` line per entry, dependencies tagged
-`(dep)` (hover for what requires them), entries already imported dimmed with
-`(✓ here)`, colliding files marked `!` with `(exists)`. `hide` folds it
-again. Nothing is written. `apply` imports all of the preset's rows, the same
-way `import` does. Hover `apply` to see what it imports.
+Presets are their own route (**Presets** in the title bar), with the same
+sidebar as Project. They are named import plans that the stack defines in its
+`presets/*.toml` files. The heading carries the count. Each row is one
+preset: its name, description (cut to fit; hover for the full text), compact
+counts against the lock (`M new`, or `all here`; `· N dep` once a plan has
+named auto-imported dependencies; hover for the long form), and two buttons.
+**plan** and **apply** both open the preset's import plan under the row: the
+same file tree as Browse (`+` new, `!` collision, sizes, `into <folder>` per
+entry, dependencies marked `needed by …`, entries already imported listed), with
+**Apply &lt;name&gt;** inside it. Nothing is written until you press it, and the
+plan clears when the import starts. **hide plan** folds it. Collisions block
+**Apply** and name the folder to change.
 
 A long list stays short on the page:
 
-- **Five rows, then `[+N more]`.** More than five presets show the first five.
-  `[+N more]` reveals the rest, `[− fewer]` goes back.
+- **Five rows, then `+N more`.** More than five presets show the first five.
+  `+N more` reveals the rest, `− fewer` goes back.
 - **Filter.** With more than eight presets a `filter…` field sits in the
   heading line. Type to narrow by name or description; every word you type
   must match (any case). The heading shows `3/12` while filtering. `Esc`
@@ -548,9 +485,9 @@ A long list stays short on the page:
   stays visible whatever the filter or the cut says.
 - **Collapse.** The heading is a toggle (`· collapse` / `· expand`) when
   there are more than five presets. On a project that already has imports, a
-  list longer than five starts collapsed to its heading, since presets are
-  mostly a starting point; in a project with nothing imported it starts open.
-  Your choice sticks until you switch project.
+  list longer than five starts collapsed to its heading; in a project with
+  nothing imported it starts open. Your choice sticks until you switch
+  project.
 
 ### App updates
 
@@ -622,7 +559,7 @@ Every view decodes the CLI's `--json` output:
 | project rows | `status` |
 | presets | `preset list`; `preset apply <name>`; preview runs `preset apply <name> --dry-run` |
 | import, adopt, `adopt a folder…` | `import`; each adopt hint is one `import --dry-run` |
-| update, update all | `update` |
+| merge upstream, merge all upstream | `update` |
 | remove, sync, init | `remove`, `sync`, `init` |
 
 The app adds `--offline` to `show` and `status`, which never need the
@@ -648,11 +585,11 @@ empty.
 | component libraries missing from browse | the CLI could not sync a remote library and has no cache. It prints a `warning:` line to stderr, and the app drops stderr on success. Not verified in the app: this row comes from reading the CLI source | in the stack checkout: `node tools/stack/cli.mjs remote sync <library>` |
 | offline | network down | `show` and `status` do not need the network. `list` syncs remote libraries first and falls back to their cache when the sync fails |
 | footer check shows an error | no network, or the release feed is not reachable (the repo must be public) | hover for the full message; `[retry]` later. Startup failures show only in the terminal |
-| `nothing listed`, `(._.) none` | the stack has no entries of that kind, or the list is empty | check the checkout: `node tools/stack/cli.mjs list` in the stack folder |
+| `nothing listed`, `none` | the stack has no entries of that kind, or the list is empty | check the checkout: `node tools/stack/cli.mjs list` in the stack folder |
 | `untracked look-alikes, nothing written:` | target files exist with different content | move them, pick another `--to`, or delete them. Identical files are fine |
-| `not committed in the stack: can't import` | the entry is only in the stack's working tree | commit it in the stack checkout, then retry |
+| `Not in the stack, so it can't be imported` (`Not in stack` on its row) | the entry is only in the stack's working tree | commit it in the stack checkout, then retry |
 | `cannot resolve path` or `path is not a directory` | the project path is gone or is a file | pick the folder again |
-| `(o_O) not found` | a route the app does not have | use `project` or `browse` in the top bar |
+| `not found` | a route the app does not have | use Project, Browse or Presets in the title bar |
 
 ## 8. Preview without the native shell
 
@@ -670,12 +607,12 @@ opens the project page, as an alias.
 
 | scenario | what it shows |
 |---|---|
-| `populated` (default) | a project with three imports; one entry not committed; one with uncommitted stack changes |
+| `populated` (default) | a project with three imports; one entry `Not in stack`; one with `Stack edits` |
 | `empty` | who, with two workers |
 | `noworker` | who, with no workers: `continue without one` leads to the project screen, then the project page |
 | `noproject` | project, with recent projects |
 | `scan` | project, with a scan root set. Press `scan` to list |
-| `conflicts` | project page with `update` rows and a conflict |
+| `conflicts` | project page with `update` rows and a conflict, with file bodies for **review changes**: `skills/file-pr` changed on both sides, `templates/agents-md` only upstream |
 | `missing` | project page with rows whose files are missing (shown as `edited`) |
 | `lookalike` | an import refused for `skills/file-pr` |
 | `fresh` | project page in a plain folder: the set-up slot with `init stack.toml` |
@@ -685,12 +622,17 @@ opens the project page, as an alias.
 | `adopt0` | project page with no adoptable folders: only the quiet `adopt a folder…` link |
 | `adopt1` | one adoptable folder next to `init stack.toml` |
 | `adopt3` | three adoptable folders next to `init stack.toml`; one differs |
-| `quickimport` | browse with one of each inline-import row state: an imported skill, an importable skill, a component needing `--to`, a refusal with look-alikes |
+| `quickimport` | browse with one of each import case: an imported skill, an importable skill, a component needing a folder, a plan with collisions |
+| `batchimport` | browse components with an eight-member library, an already-imported entry and a plan with collisions (batch plan) |
 | `bad-stack` | the stack checkout setup screen; get stack clones and the gate lifts |
 | `no-node` | the setup screen with node missing |
 | `no-auth` | the setup screen with no GitHub auth: get stack fails with the one actionable error |
 | `no-cli` | a valid stack whose command is not linked: the quiet [add stack command] line |
 | `cli-foreign` | the quiet line when something else owns the `stack` name (no offer) |
+| `offline` | the catalog loads, then the network drops after 1.5 s: Browse keeps the saved list; refresh shows the `Showing saved catalog` strip with Retry |
+| `dirty` | a real import is refused because the project has uncommitted changes |
+| `locked` | a real import is refused because git is busy in the project (index.lock) |
+| `interrupted` | a real import stops halfway: one file landed, one did not; the project row then shows Missing files with Restore files / Remove |
 | `no-path` | the quiet line when the bin dir is off PATH (no offer) |
 
 A `+update-available` or `+update-error` suffix on any scenario drives the
@@ -708,6 +650,24 @@ Without a suffix the picker returns the first adoptable folder, else a
 non-matching folder.
 
 A `+grows` suffix arms `window.__mockGrow()`, which adds one skill to the
-catalog — call it after the first load, so the browse `[refresh]` visibly
+catalog — call it after the first load, so the browse **refresh** visibly
 picks it up. `+listfail` arms `window.__mockFailLists()`, which fails
-later catalog lists, for the refresh error state.
+later catalog lists, for the refresh error state. `+t3` populates mock T3
+Code branch worktrees and threads (`#populated+t3,/project` or
+`#populated+t3,/browse/skills/file-pr`).
+
+### T3 Code branches and thread injection
+
+When the open project has multiple git/T3 worktrees or `t3` is installed:
+
+- **Worktree switcher (top bar):** switch the active `stack` target between the
+  main checkout and any branch worktree in memory without polluting recent
+  projects.
+- **Worktrees & T3 threads (Project page):** switch target per worktree or
+  thread, open a thread link, or run `[sync all worktrees]` to invoke
+  `stack sync --json` across every worktree holding a `stack.toml`.
+- **Direct thread injection (Browse entry detail):** send an entry into an
+  existing T3 Code thread or start a `+ new thread` (optionally creating a
+  branch worktree), either as **inject prompt** (inline summary + entry doc) or
+  **import + notify** (import into that thread's worktree/root first, then
+  send a prompt referencing the imported path or `$skill`).

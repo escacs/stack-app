@@ -1,8 +1,10 @@
 # Stack desktop client
 
 Desktop client for the [escacs/stack](https://github.com/escacs/stack)
-library: a Tauri 2 app with a SolidJS + Vite renderer. Pitch black, mono,
-minimal.
+library: a Tauri 2 app with a SolidJS + Vite renderer. The UI is
+"stack-alabaster": a warm-neutral frameless window with a sidebar, one white
+sheet and obsidian primary buttons, in light and dark (the theme button in the
+title bar toggles them; the choice is remembered).
 
 The stack lives in its own repo; this app shells out to its CLI
 (`node <stack>/tools/stack/cli.mjs …`) and never reimplements the import
@@ -13,6 +15,13 @@ when it cannot find one).
 
 - [docs/USAGE.md](docs/USAGE.md): the screens, keys, row states, actions,
   where settings live, troubleshooting, and the browser preview.
+
+Three routes, switched in the title bar: **Project** (imports, worktrees, T3
+threads), **Browse** (the catalog) and **Presets**. Keys in Browse: `/`
+search, `↑` `↓` or `j` `k` move the list (the preview follows), `Enter` focus
+the preview, `i` open the import plan, `Space` toggle a row, `a` select all, `r`
+refresh, `Escape` back out. Every import shows its file-level plan first, and
+the Project page can diff an import before updating it.
 - [docs/INSTALL.md](docs/INSTALL.md): installing the AppImage, webview and
   node prerequisites, stack provisioning, uninstalling.
 - [docs/UPDATES.md](docs/UPDATES.md): how the app updates itself and how a
@@ -111,9 +120,14 @@ verbatim, they are written for users. The typed wrappers live in
 | `stack_location` | `{ stackDir? }` | `StackLocation` (wrapper exists; no current view calls it) |
 | `validate_stack` | `{ stackDir? }` | `StackReport` |
 | `stack_run` | `{ subcommand, args, projectDir, stackDir? }` | `{ stdout, stderr, code, truncated }` |
+| `read_project_file` | `{ projectDir, path }` | `ProjectFile` `{ exists, size, binary, truncated, text }`: one file inside the project, read-only, escapes and symlinks out refused; text capped at 256 KiB (for review changes) |
 | `provision_stack` | — | `ProvisionReport` (never throws; failure is status `manual`) |
 | `stack_cli_status` | `{ stackDir? }` | `CliStatus` (read-only) |
 | `link_stack_cli` | `{ stackDir? }` | `CliStatus` (links, or reports why not) |
+| `t3_status` | — | `T3Status` (probes `t3 --version`) |
+| `t3_workspace` | `{ projectDir: string }` | `T3WorkspaceReport` (git/T3 worktrees + T3 threads for the repo) |
+| `t3_send_thread` | `{ threadId: string, message: string }` | `T3ThreadActionResult` (sends prompt via `t3 thread send -`) |
+| `t3_start_thread` | `{ projectDir, message, title?, worktree?, branch? }` | `T3ThreadActionResult` (starts thread via `t3 thread start -`) |
 
 ```ts
 type AppConfig = {
@@ -134,6 +148,11 @@ type StackLocation = { path: string | null; source: 'settings' | 'env' | 'auto' 
 type StackReport = { path: string; valid: boolean; source: string; git: boolean; cli: boolean; node: NodeStatus; error: string | null };
 type ProvisionReport = { status: 'kept' | 'cloned-gh' | 'cloned-ssh' | 'manual'; path: string | null; message: string };
 type CliStatus = { status: 'linked-ok' | 'missing' | 'points-elsewhere' | 'foreign-file' | 'bin-not-on-PATH'; link: string; expected: string; actual: string | null; onPath: boolean; message: string };
+type T3Status = { available: boolean; version: string | null; error: string | null };
+type WorktreeInfo = { path: string; branch: string | null; detached: boolean; isMain: boolean; isT3: boolean; hasLock: boolean; isCurrent: boolean };
+type T3ThreadInfo = { threadId: string; title: string; status: string; provider: string | null; model: string | null; branch: string | null; worktreePath: string | null; link: string | null; updatedAt: string | null };
+type T3WorkspaceReport = { t3Available: boolean; t3Version: string | null; t3Error: string | null; registered: boolean; mainRoot: string; worktrees: WorktreeInfo[]; threads: T3ThreadInfo[] };
+type T3ThreadActionResult = { threadId: string; title: string | null; link: string | null; status: string | null };
 ```
 
 `provision_stack` mirrors `scripts/provision-stack.sh` (same order, same
@@ -189,7 +208,8 @@ need no capability entries; each plugin call needs its permission.
 ## Presets
 
 Presets are named import plans that the stack keeps in `presets/*.toml`. They
-live at the bottom of the project page (`src/views/Presets.tsx`), one row
+have their own **Presets** route (`src/views/Presets.tsx`, rendered by the
+project view's op runner), one row
 per preset: name, description, import counts against the lock, and `preview`
 / `apply` buttons. `preview` runs `preset apply <name> --dry-run --json`
 and expands what would land where and what is already imported, without
@@ -253,16 +273,17 @@ web-vendor/style.css            # snapshot of the stack website's stylesheet
 dev/mock-bridge.js dev/mock-app-bridge.js
 src/                             # SolidJS renderer
   index.tsx App.tsx app.css ui.tsx site.tsx smooth.ts
-  bridge.ts store.ts updater.ts router.ts onboard.ts
-  browseData.ts stackArgs.ts json.ts parse.ts
+  bridge.ts store.ts t3.ts updater.ts router.ts onboard.ts
+  browseData.ts browseList.ts plan.ts planLoad.ts diff.ts stackArgs.ts json.ts parse.ts
   views/
     Onboard.tsx StackSetup.tsx TopBar.tsx TitleBar.tsx
-    Browse.tsx Project.tsx Presets.tsx Updates.tsx
+    Browse.tsx EntryRow.tsx EntryPreview.tsx ImportPlan.tsx ReviewChanges.tsx
+    DiffView.tsx Project.tsx Presets.tsx T3Panel.tsx T3Inject.tsx Updates.tsx
   *.test.ts                      # vitest, node environment
 src-tauri/
   Cargo.toml build.rs tauri.conf.json Cargo.lock
   capabilities/default.json
-  src/{main,lib,config,paths,project,scan,stack}.rs
+  src/{main,lib,config,paths,project,scan,stack,t3}.rs
   tests/stack_e2e.rs
 docs/                            # INSTALL, UPDATES, PORTABILITY, USAGE
 scripts/                         # install, provision, uninstall (AppImage)
@@ -312,9 +333,9 @@ Use a stack checkout with a committed entry such as `skills/file-pr`. Run
 3. Project set-up: in a folder with no `stack.toml`, confirm the project
    page opens with the set-up slot on top, press `init stack.toml`, and
    confirm `stack.toml` and the managed `.gitignore` block exist.
-4. Browse import: search `file-pr`, open the entry, leave `--to` empty, press
-   `import`, and confirm `.agents/skills/file-pr` is listed and gains a row
-   on the project page. The project's `.gitignore` covers it.
+4. Browse import: search `file-pr`, move the cursor onto it, press `i`, read
+   the plan (the files and `into .agents/skills/file-pr`), press `Import`, and
+   confirm `.agents/skills/file-pr` gains a row on the project page. The project's `.gitignore` covers it.
 5. Edited row: change one line in the imported `SKILL.md`; the row reads
    `edited` with `SKILL.md` named.
 6. Update: commit a change to that entry in the stack, press `update`, and
