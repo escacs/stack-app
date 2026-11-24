@@ -13,6 +13,7 @@ pub mod project;
 pub mod provision;
 pub mod scan;
 pub mod stack;
+pub mod t3;
 
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
@@ -116,6 +117,7 @@ pub fn run() {
             config::add_recent_project,
             project::validate_project,
             project::project_folders,
+            project::read_project_file,
             scan::scan_projects,
             scan::default_scan_roots,
             stack::node_status,
@@ -125,6 +127,10 @@ pub fn run() {
             provision::provision_stack,
             provision::stack_cli_status,
             provision::link_stack_cli,
+            t3::t3_status,
+            t3::t3_workspace,
+            t3::t3_send_thread,
+            t3::t3_start_thread,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the stack app");

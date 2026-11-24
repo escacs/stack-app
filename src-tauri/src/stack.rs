@@ -50,6 +50,7 @@ const ALLOW_SUBCOMMANDS: &[&str] = &[
     "update",
     "remove",
     "sync",
+    "restore",
     "gitignore",
     "init",
     "preset",
@@ -57,7 +58,15 @@ const ALLOW_SUBCOMMANDS: &[&str] = &[
 
 /// Flags that take a value. `--json`, `--offline` and `--dry-run` (booleans) and `--`
 /// (separator) are handled separately in [`build_argv`].
-const ALLOW_FLAGS: &[&str] = &["--kind", "--to", "--ref", "--file"];
+const ALLOW_FLAGS: &[&str] = &[
+    "--kind",
+    "--to",
+    "--ref",
+    "--file",
+    "--keep-mine",
+    "--take-upstream",
+    "--resolve",
+];
 const KINDS: &[&str] = &[
     "skill",
     "style",
@@ -114,7 +123,7 @@ fn is_id(s: &str) -> bool {
             .any(|seg| seg.is_empty() || seg == "." || seg == "..")
 }
 
-fn is_ref(s: &str) -> bool {
+pub(crate) fn is_ref(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
         && s.bytes()
@@ -150,6 +159,9 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
     let mut file: Option<&str> = None;
     let mut json = false;
     let mut dryrun = false;
+    let mut no_backup = false;
+    // Per-file update choices: (flag, value) pairs in the order given.
+    let mut choices: Vec<(&str, String)> = Vec::new();
     let mut offline = false;
     let mut dashdash = false;
     let mut i = 0;
@@ -165,6 +177,8 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
             dryrun = true;
         } else if a == "--offline" {
             offline = true;
+        } else if a == "--no-backup" {
+            no_backup = true;
         } else if a.starts_with('-') {
             if !ALLOW_FLAGS.contains(&a) {
                 return Err(format!("flag '{a}' is not allowed"));
@@ -196,6 +210,23 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                     }
                     file = Some(v);
                 }
+                "--keep-mine" | "--take-upstream" => {
+                    if !is_id(v) {
+                        return Err(format!("invalid {a} value"));
+                    }
+                    choices.push((if a == "--keep-mine" { "--keep-mine" } else { "--take-upstream" }, v.to_string()));
+                }
+                "--resolve" => {
+                    // <file>=mine|upstream
+                    let ok = v
+                        .rsplit_once('=')
+                        .map(|(f, w)| is_id(f) && matches!(w, "mine" | "upstream"))
+                        .unwrap_or(false);
+                    if !ok {
+                        return Err("invalid --resolve value (use <file>=mine|upstream)".to_string());
+                    }
+                    choices.push(("--resolve", v.to_string()));
+                }
                 _ => unreachable!("allowlist checked above"),
             }
         } else {
@@ -203,8 +234,14 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
         }
         i += 1;
     }
-    if dryrun && !matches!(sub, "preset" | "import") {
-        return Err("--dry-run is only supported by import and preset apply".to_string());
+    if dryrun && !matches!(sub, "preset" | "import" | "update" | "restore" | "sync") {
+        return Err(
+            "--dry-run is only supported by import, update, restore, sync and preset apply"
+                .to_string(),
+        );
+    }
+    if (!choices.is_empty() || no_backup) && sub != "update" {
+        return Err("--keep-mine/--take-upstream/--resolve/--no-backup are only for update".to_string());
     }
     if offline && !matches!(sub, "list" | "search" | "show" | "status") {
         return Err("--offline is only supported by list, search, show and status".to_string());
@@ -332,10 +369,33 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                 return Err("invalid entry id".to_string());
             }
             if kind.is_some() || to.is_some() || file.is_some() {
-                return Err("update allows only --ref".to_string());
+                return Err("update allows only --ref and per-file choices".to_string());
+            }
+            if (!choices.is_empty() || no_backup) && positionals.len() != 1 {
+                return Err("per-file choices need exactly one entry id".to_string());
+            }
+            if no_backup && !choices.iter().any(|(f, _)| *f == "--take-upstream" || *f == "--resolve") {
+                return Err("--no-backup goes with --take-upstream or --resolve".to_string());
+            }
+            let mut flags = flag_vec(false, false, true, false, true)?;
+            // Choices go before the trailing --offline/--json flags' order does not matter to the CLI.
+            for (f, v) in &choices {
+                flags.extend([f.to_string(), v.clone()]);
+            }
+            if no_backup {
+                flags.push("--no-backup".to_string());
+            }
+            Ok(BuiltArgv::new(flags, pos()))
+        }
+        "restore" => {
+            if !positionals.iter().all(|p| is_id(p)) {
+                return Err("invalid entry id".to_string());
+            }
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
+                return Err("restore takes no flags".to_string());
             }
             Ok(BuiltArgv::new(
-                flag_vec(false, false, true, false, false)?,
+                flag_vec(false, false, false, false, true)?,
                 pos(),
             ))
         }
@@ -351,7 +411,19 @@ fn build_argv(sub: &str, args: &[String], project: &Path) -> Result<BuiltArgv, S
                 pos(),
             ))
         }
-        "sync" | "gitignore" | "init" => {
+        "sync" => {
+            if !positionals.iter().all(|p| is_id(p)) {
+                return Err("invalid entry id".to_string());
+            }
+            if kind.is_some() || to.is_some() || git_ref.is_some() || file.is_some() {
+                return Err("sync takes no flags".to_string());
+            }
+            Ok(BuiltArgv::new(
+                flag_vec(false, false, false, false, true)?,
+                pos(),
+            ))
+        }
+        "gitignore" | "init" => {
             if !positionals.is_empty() {
                 return Err(format!("{sub} takes no entry ids"));
             }
@@ -1193,25 +1265,48 @@ pub(crate) fn run_with_timeout(
 }
 
 /// Same runner with the caller's own wording, for non-`stack_run` children
-/// (provisioning clones). `what` names the operation ("gh clone of
-/// escacs/stack"), `hint` is the one actionable sentence after a timeout.
+/// (provisioning clones, t3/git queries). `what` names the operation, `hint`
+/// is the one actionable sentence after a timeout.
 pub(crate) fn run_with_timeout_hint(
     cmd: &mut Command,
     timeout: Duration,
     what: &str,
     hint: &str,
 ) -> Result<(i32, Captured, Captured), String> {
+    run_with_timeout_input(cmd, None, timeout, what, hint)
+}
+
+/// Same runner with optional stdin bytes written on a background thread and
+/// closed at EOF before waiting, so large messages never deadlock pipe buffers.
+pub(crate) fn run_with_timeout_input(
+    cmd: &mut Command,
+    stdin_bytes: Option<Vec<u8>>,
+    timeout: Duration,
+    what: &str,
+    hint: &str,
+) -> Result<(i32, Captured, Captured), String> {
+    use std::io::Write;
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    let has_stdin = stdin_bytes.is_some();
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null())
+        .stdin(if has_stdin { Stdio::piped() } else { Stdio::null() })
         .spawn()
         .map_err(|e| format!("run {what}: {e}"))?;
+    let in_h = if let Some(bytes) = stdin_bytes {
+        let mut stdin = child.stdin.take().expect("stdin piped");
+        Some(std::thread::spawn(move || {
+            let _ = stdin.write_all(&bytes);
+            drop(stdin);
+        }))
+    } else {
+        None
+    };
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
     let out_h = std::thread::spawn(move || drain_capped(stdout));
@@ -1226,6 +1321,9 @@ pub(crate) fn run_with_timeout_hint(
             None => {
                 if start.elapsed() >= timeout {
                     kill_child_tree(&mut child);
+                    if let Some(h) = in_h {
+                        let _ = h.join();
+                    }
                     let _ = out_h.join();
                     let _ = err_h.join();
                     return Err(format!(
@@ -1237,6 +1335,9 @@ pub(crate) fn run_with_timeout_hint(
             }
         }
     };
+    if let Some(h) = in_h {
+        let _ = h.join();
+    }
     let (out, err) = join_drains(out_h, err_h, child.id());
     Ok((code, out, err))
 }
@@ -1361,7 +1462,8 @@ mod tests {
         for sub in ["sync", "gitignore", "init"] {
             let argv = build_argv(sub, &[], &p).unwrap();
             assert!(argv.flags.is_empty() && argv.positionals.is_empty());
-            assert!(build_argv(sub, &args(&["x"]), &p).is_err());
+            // sync takes entry ids now; gitignore and init still take none.
+            assert_eq!(build_argv(sub, &args(&["x"]), &p).is_ok(), sub == "sync");
             assert!(build_argv(sub, &args(&["--ref", "v1"]), &p).is_err());
         }
         let argv = build_argv("init", &args(&["--json"]), &p).unwrap();
@@ -1409,6 +1511,47 @@ mod tests {
     }
 
     #[test]
+    fn update_per_file_choices_restore_and_sync_ids() {
+        let p = proj("choices");
+        let argv = build_argv(
+            "update",
+            &args(&["skills/a", "--keep-mine", "SKILL.md", "--take-upstream", "notes/x.md", "--dry-run", "--json"]),
+            &p,
+        )
+        .unwrap();
+        assert_eq!(
+            argv.flags,
+            vec!["--dry-run", "--json", "--keep-mine", "SKILL.md", "--take-upstream", "notes/x.md"]
+        );
+        assert_eq!(argv.positionals, vec!["skills/a"]);
+        let argv = build_argv("update", &args(&["skills/a", "--resolve", "SKILL.md=upstream", "--no-backup"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--resolve", "SKILL.md=upstream", "--no-backup"]);
+        assert!(build_argv("update", &args(&["skills/a", "--resolve", "SKILL.md=theirs"]), &p).is_err());
+        assert!(build_argv("update", &args(&["skills/a", "--resolve", "../x=mine"]), &p).is_err());
+        assert!(build_argv("update", &args(&["skills/a", "--keep-mine", "../x"]), &p).is_err());
+        assert!(build_argv("update", &args(&["skills/a", "--keep-mine"]), &p).is_err());
+        // Choices need exactly one id; --no-backup needs a take.
+        assert!(build_argv("update", &args(&["--keep-mine", "SKILL.md"]), &p).is_err());
+        assert!(build_argv("update", &args(&["skills/a", "skills/b", "--keep-mine", "SKILL.md"]), &p).is_err());
+        assert!(build_argv("update", &args(&["skills/a", "--keep-mine", "SKILL.md", "--no-backup"]), &p).is_err());
+        // Only update takes choices.
+        assert!(build_argv("restore", &args(&["--keep-mine", "SKILL.md"]), &p).is_err());
+        assert!(build_argv("import", &args(&["skills/a", "--no-backup"]), &p).is_err());
+        // restore and sync take ids, --dry-run and --json.
+        let argv = build_argv("restore", &args(&["skills/a", "skills/b", "--dry-run", "--json"]), &p).unwrap();
+        assert_eq!(argv.flags, vec!["--dry-run", "--json"]);
+        assert_eq!(argv.positionals, vec!["skills/a", "skills/b"]);
+        assert!(build_argv("restore", &[], &p).is_ok());
+        assert!(build_argv("restore", &args(&["../evil"]), &p).is_err());
+        assert!(build_argv("restore", &args(&["--ref", "v1"]), &p).is_err());
+        let argv = build_argv("sync", &args(&["skills/a", "--json"]), &p).unwrap();
+        assert_eq!(argv.positionals, vec!["skills/a"]);
+        assert!(build_argv("sync", &args(&["--to", "x"]), &p).is_err());
+        assert!(build_argv("init", &args(&["x"]), &p).is_err());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
     fn preset_routing_validates_actions_names_and_dry_run() {
         let p = proj("pre");
         let argv = build_argv("preset", &args(&["list", "--json"]), &p).unwrap();
@@ -1439,7 +1582,7 @@ mod tests {
         // import also accepts --dry-run (the project page's adopt hints);
         // no other subcommand does. Preset takes no valued flags.
         assert!(build_argv("list", &args(&["--dry-run"]), &p).is_err());
-        assert!(build_argv("update", &args(&["--dry-run"]), &p).is_err());
+        assert!(build_argv("remove", &args(&["x", "--dry-run"]), &p).is_err());
         let argv = build_argv("import", &args(&["skills/a", "--dry-run", "--json"]), &p).unwrap();
         assert_eq!(argv.flags, vec!["--dry-run", "--json"]);
         assert_eq!(argv.positionals, vec!["skills/a"]);
@@ -1460,7 +1603,7 @@ mod tests {
         assert!(build_argv("list", &args(&["--offline"]), &p).is_ok());
         assert!(build_argv("search", &args(&["q", "--offline"]), &p).is_ok());
         // Writes keep their network-synced view of the stack.
-        for sub in ["import", "update", "remove", "sync", "init", "gitignore", "preset"] {
+        for sub in ["import", "update", "remove", "sync", "restore", "init", "gitignore", "preset"] {
             assert!(build_argv(sub, &args(&["--offline"]), &p).is_err(), "{sub}");
         }
         let _ = std::fs::remove_dir_all(&p);
@@ -1529,7 +1672,7 @@ mod tests {
         // `preset` applies under the write budget (list/show just get the
         // longer leash; the timeout only sees the subcommand).
         for sub in [
-            "import", "update", "remove", "sync", "gitignore", "init", "preset",
+            "import", "update", "remove", "sync", "restore", "gitignore", "init", "preset",
         ] {
             assert_eq!(timeout_for(sub), Duration::from_secs(180));
         }

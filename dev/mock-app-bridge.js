@@ -11,9 +11,10 @@
 // scan, noworker, noproject, bad-stack, fresh, many (15 presets, three
 // imports), manyfresh (15 presets, no stack.toml), lots (36 presets),
 // adopt0 (no adoptable folders), adopt1 (one), adopt3 (three, one differs),
-// quickimport (one of each inline-import row state), batchimport (an
+// quickimport (one of each import case), batchimport (an
 // eight-member component library plus an already-imported row and two
-// refusals), no-auth, no-cli, cli-foreign, cli-elsewhere, no-path.
+// collisions in the import plan), no-auth, no-cli, cli-foreign, cli-elsewhere, no-path,
+// offline, dirty, locked, interrupted (failure modes: see the block above `const fx`).
 // A `+update-available` or `+update-error` suffix on any scenario drives the
 // footer updater fixture (e.g. `#populated+update-available,/project`):
 // the former answers checks with 0.1.9 and fires the startup update event,
@@ -23,13 +24,16 @@
 // which adds one skill to the catalog — call it after the first load, so the
 // browse refresh visibly picks it up. `+listfail` arms
 // `window.__mockFailLists()`, which fails later catalog lists, for the
-// refresh error state. (Triggers, not counters: onboarding itself spends
-// bare `list` calls before the first visible render.)
+// refresh error state. `+t3` populates mock T3 Code branch worktrees and
+// threads (for testing worktree switching, sync-all, and thread injection).
+// (Triggers, not counters: onboarding itself spends bare `list` calls before
+// the first visible render.)
 (() => {
   'use strict';
 
   const rawScenario = ((location.hash || '#populated').slice(1).split(',')[0] || '').split('/')[0] || 'populated';
   const [scenario, ...flags] = rawScenario.split('+');
+  const t3Mode = flags.includes('t3') || scenario === 't3';
   // Footer updater fixture: 'available' offers 0.1.9 (check answers it and
   // the startup event fires), 'error' fails checks, otherwise up to date.
   const updaterMode = flags.includes('update-available')
@@ -77,6 +81,9 @@
     { id: 'systems/engineering-conventions', usage: 'reference', status: 'stable', summary: 'How escacs code is organized, tested and reviewed.' },
     { id: 'components/react/button', usage: 'copy', status: 'experimental', summary: 'Button with variants, sizes and a loading state.', requires: ['components/react/icon-button'], library: { name: 'react', extends: null, default: true } },
     { id: 'components/react/icon-button', usage: 'copy', status: 'experimental', summary: 'Square icon-only action button.', library: { name: 'react', extends: null, default: true } },
+    { id: 'components/stack-alabaster/panel', usage: 'copy', status: 'stable', summary: 'Bordered panel surface for grouped content.', library: { name: 'stack-alabaster', extends: null, default: false } },
+    { id: 'components/stack-alabaster/tabs', usage: 'copy', status: 'stable', summary: 'Tab strip with keyboard roving.', library: { name: 'stack-alabaster', extends: null, default: false } },
+    { id: 'components/dithercn/dither-image', usage: 'copy', status: 'experimental', summary: 'Image rendered through an ordered dither.', library: { name: 'dithercn', extends: null, default: false } },
     { id: 'libraries/solid-js', usage: 'package', status: 'stable', summary: 'Pinned SolidJS reference for app renderers.' },
     { id: 'assets/escacs-mark', usage: 'copy', status: 'stable', summary: 'The Escacs knight logo mark as SVG.' },
     { id: 'templates/agents-md', usage: 'copy', status: 'stable', summary: 'AGENTS.md scaffold for a new project.', payload: 'files' },
@@ -119,10 +126,14 @@
     if (/^(skills|styles)\//.test(e.id)) base.unshift('SKILL.md');
     // One image-bearing entry so previews and file bodies render.
     if (e.id === 'assets/escacs-mark') base.push('escacs-logo.svg');
+    // Scenario-specific extras (review-changes fixtures): files the entry gained upstream.
+    for (const x of fx.extraFiles?.[e.id] ?? []) if (!base.includes(x)) base.push(x);
     return base;
   };
 
   const entryFileBody = (e, path) => {
+    const fixture = fx.bodies?.[`${e.id}|${path}`]?.upstream;
+    if (fixture != null) return { binary: false, markdown: path.endsWith('.md'), text: fixture, base64: null };
     if (path.endsWith('.svg')) {
       return {
         binary: false,
@@ -212,12 +223,22 @@
   // Rendered into the exact shapes of imports.mjs (statusEntries for --json,
   // formatStatus() for text).
 
+  // Same priority as the CLI: gone > missing > update-available > edited > up-to-date.
+  const rowStateWord = (r) => {
+    const missing = r.missing ?? [];
+    if (r.gone) return 'gone';
+    if (missing.length) return 'missing';
+    if (r.upstream?.length) return 'update-available';
+    if ((r.local ?? []).some((f) => !missing.includes(f))) return 'edited';
+    return 'up-to-date';
+  };
   const statusJson = (rows) => ({
     command: 'status',
     commit: FULL,
     rows: rows.map((r) => ({
       id: r.id, path: r.path, commit: r.commit,
       local: [...(r.local ?? [])], upstream: [...(r.upstream ?? [])], gone: !!r.gone,
+      missing: [...(r.missing ?? [])], state: rowStateWord(r),
     })),
   });
 
@@ -371,6 +392,17 @@
     error: null,
   };
 
+
+  // Review-changes fixtures (the `conflicts` scenario). skills/file-pr: SKILL.md was
+  // edited here AND changed upstream (both sides), helpers.mjs is new upstream only.
+  // templates/agents-md: AGENTS.md changed upstream only.
+  const lines = (n, p) => Array.from({ length: n }, (_, i) => `${p} ${i + 1}`);
+  const FILE_PR_UPSTREAM = ['---', 'name: file-pr', 'description: File a concise pull request from the current branch.', '---', '', '# file-pr', '', ...lines(14, 'Step'), '', '## Output', '', 'Open the PR with a title under 70 characters and a three-bullet body.', 'Link the issue it closes.', 'Mention any follow-up work in a final line.', '', ...lines(10, 'Note'), '', 'Never push to the default branch.'].join('\n') + '\n';
+  const FILE_PR_INSTALLED = ['---', 'name: file-pr', 'description: File a concise pull request from the current branch.', '---', '', '# file-pr', '', ...lines(14, 'Step'), '', '## Output', '', 'Open the PR with a short title and a two-bullet body (my house style).', 'Link the issue it closes.', '', ...lines(10, 'Note'), '', 'Never push to the default branch.', 'Always ask me before pushing.'].join('\n') + '\n';
+  const HELPERS_UPSTREAM = ['export function title(branch) {', "  return branch.replace(/[-_]/g, ' ');", '}', '', 'export function body(commits) {', "  return commits.slice(0, 3).map((c) => `- ${c}`).join('\\n');", '}'].join('\n') + '\n';
+  const AGENTS_OLD = ['# AGENTS.md', '', '## Conventions', '', 'Keep changes small.', 'Run the tests before you finish.'].join('\n') + '\n';
+  const AGENTS_NEW = ['# AGENTS.md', '', '## Conventions', '', 'Keep changes small.', 'Run the tests before you finish.', '', '## Reviews', '', 'Ask for a review on anything over 200 lines.'].join('\n') + '\n';
+
   const SCENARIOS = {
     empty: () => ({
       config: { ...baseConfig, worker: null },
@@ -414,7 +446,7 @@
         path: '/home/dev/escacs/stack', valid: false, source: 'settings',
         git: true, cli: true,
         node: { ok: false, version: null, major: null, error: 'node was not found on PATH. Install Node.js 22 or newer, then relaunch the app.' },
-        error: "'/home/dev/escacs/stack' is not a usable stack checkout: . Install Node.js 22 or newer, then relaunch the app.",
+        error: 'node was not found on PATH. Install Node.js 22 or newer, then relaunch the app.',
       },
       report: (path) => ({ path, valid: false, markers: [], errors: ['cannot resolve path'] }),
       lock: [],
@@ -429,10 +461,21 @@
       stack: structuredClone(okStack),
       report: (path) => ({ path, valid: true, markers: ['stack.toml', '.git'], errors: [] }),
       lock: [
-        { id: 'skills/file-pr', commit: 'a1b2c3d000000000000000000000000000000000', path: '.agents/skills/file-pr', local: ['SKILL.md'], upstream: ['SKILL.md', 'helpers.mjs'] },
+        { id: 'skills/file-pr', commit: 'a1b2c3d000000000000000000000000000000000', path: '.agents/skills/file-pr', local: ['SKILL.md', 'helpers.mjs'], upstream: ['SKILL.md', 'helpers.mjs'] },
         { id: 'styles/folio-light', commit: `${HEAD}00000000000000000000000000000000000`, path: '.agents/skills/folio-light', local: [], upstream: [] },
-        { id: 'templates/agents-md', commit: 'a1b2c3d000000000000000000000000000000000', path: '.', local: [], upstream: ['files/AGENTS.md'] },
+        { id: 'templates/agents-md', commit: 'a1b2c3d000000000000000000000000000000000', path: '.', local: [], upstream: ['AGENTS.md'] },
       ],
+      extraFiles: { 'skills/file-pr': ['helpers.mjs'] },
+      bodies: {
+        'skills/file-pr|SKILL.md': { upstream: FILE_PR_UPSTREAM },
+        'skills/file-pr|helpers.mjs': { upstream: HELPERS_UPSTREAM },
+        'templates/agents-md|files/AGENTS.md': { upstream: AGENTS_NEW },
+      },
+      installed: {
+        '.agents/skills/file-pr/SKILL.md': FILE_PR_INSTALLED,
+        '.agents/skills/file-pr/helpers.mjs': `// my helper tweaks\n${HELPERS_UPSTREAM}`,
+        'AGENTS.md': AGENTS_OLD,
+      },
       uncommitted: [],
       noWorkers: false,
       scan: [],
@@ -642,6 +685,28 @@
         'components/batch/card': ['src/components/card/README.md', 'src/components/card/stack.json'],
       },
     }),
+    // Components as a file explorer: six libraries. react and stack-alabaster
+    // are plain; stack-alabaster is fully imported (Imported ✓); drafts has
+    // only uncommitted members (Import all disabled); dithercn is a remote
+    // library whose members the plan cannot resolve; batch has eight members
+    // with avatar already imported.
+    explorer: () => {
+      const base = SCENARIOS.populated();
+      const row = (id, path) => ({ id, commit: FULL, path, local: [], upstream: [] });
+      return {
+        ...base,
+        lock: [...base.lock, row('components/stack-alabaster/panel', 'src/components/panel'), row('components/stack-alabaster/tabs', 'src/components/tabs'), row('components/batch/avatar', 'src/components/avatar')],
+        remoteFail: { 'components/dithercn/': 'remote: dithercn is a remote component library and its cache is not ready (members are fetched live)' },
+        extraCatalog: [
+          { id: 'components/dithercn/dither-button', usage: 'copy', status: 'experimental', summary: 'Button with a dithered fill.', library: { name: 'dithercn', extends: null, default: false } },
+          { id: 'components/drafts/sheet', usage: 'copy', status: 'experimental', summary: 'Bottom sheet, not committed yet.', committed: false, library: { name: 'drafts', extends: 'react', default: false } },
+          { id: 'components/drafts/menu', usage: 'copy', status: 'experimental', summary: 'Menu, not committed yet.', committed: false, library: { name: 'drafts', extends: 'react', default: false } },
+          ...['card', 'dialog', 'input', 'select', 'tabs', 'tooltip', 'avatar', 'badge'].map((n) => ({
+            id: `components/batch/${n}`, usage: 'copy', status: 'experimental', summary: `Batch library ${n} component (fixture).`, library: { name: 'batch', extends: null, default: false },
+          })),
+        ],
+      };
+    },
     // First-run gate: nothing validates, the app must show StackSetup.
     // get stack clones and the gate lifts (see the provision_stack handler).
     'bad-stack': () => ({
@@ -699,7 +764,47 @@
     },
   };
 
+  // Failure-mode fixtures on top of the populated project:
+  //  offline     the catalog list answers once, then the network drops (1.5 s)
+  //              so Browse keeps its saved list and a refresh fails
+  //  dirty       a real import is refused: uncommitted changes in the project
+  //  locked      a real import is refused: git is busy (index.lock)
+  //  interrupted a real import stops halfway: one file landed, one did not
+  SCENARIOS.offline = () => ({ ...SCENARIOS.populated(), offlineAfter: 1500 });
+  SCENARIOS.dirty = () => ({ ...SCENARIOS.populated(), importFail: "error: Your local changes to the following files would be overwritten by merge:\n\t.agents/skills\nPlease commit your changes or stash them before you merge." });
+  SCENARIOS.locked = () => ({ ...SCENARIOS.populated(), importFail: "fatal: Unable to create '/home/dev/projects/folio/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository." });
+  SCENARIOS.interrupted = () => ({ ...SCENARIOS.populated(), interrupted: true });
+
   const fx = (SCENARIOS[scenario] ?? SCENARIOS.populated)();
+  let listFailMsg = 'fixture: the stack moved mid-browse (mock +listfail)';
+  if (fx.offlineAfter) {
+    setTimeout(() => {
+      listsFail = true;
+      listFailMsg = "fatal: unable to access 'https://github.com/escacs/stack.git/': Could not resolve host: github.com";
+    }, fx.offlineAfter);
+  }
+  // `+persist` makes the config survive reloads like the real config.json
+  // does (worker, project, recents), for relaunch checks. Clear it with
+  // localStorage.removeItem('stack:mock-config:<scenario>').
+  const persistKey = `stack:mock-config:${scenario}`;
+  const persistOn = flags.includes('persist');
+  if (persistOn) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(persistKey) || 'null');
+      if (saved) Object.assign(fx.config, saved);
+    } catch {
+      /* ignore */
+    }
+  }
+  const persistConfig = () => {
+    if (!persistOn) return;
+    try {
+      const { worker, project, recentProjects } = fx.config;
+      localStorage.setItem(persistKey, JSON.stringify({ worker, project, recentProjects }));
+    } catch {
+      /* ignore */
+    }
+  };
   const presets = () => fx.presets ?? PRESETS;
   // Provision + stack-command fixtures default to the settled state (a kept
   // checkout, the command linked); scenarios above override what they need.
@@ -714,7 +819,7 @@
   // answer in the real CLI shapes (JSON when asked, text otherwise).
 
   function splitArgs(args) {
-    const out = { json: false, dryRun: false, kind: null, to: null, file: null, positional: [] };
+    const out = { json: false, dryRun: false, kind: null, to: null, file: null, noBackup: false, choices: {}, positional: [] };
     let dashdash = false;
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
@@ -726,6 +831,17 @@
       if (a === '--kind') { out.kind = args[++i]; continue; }
       if (a === '--to') { out.to = args[++i]; continue; }
       if (a === '--file') { out.file = args[++i]; continue; }
+      if (a === '--no-backup') { out.noBackup = true; continue; }
+      // Per-file update choices (repeat the flag or use commas, like the CLI).
+      if (a === '--keep-mine' || a === '--take-upstream') {
+        for (const f of String(args[++i] ?? '').split(',').filter(Boolean)) out.choices[f] = a === '--keep-mine' ? 'mine' : 'upstream';
+        continue;
+      }
+      if (a === '--resolve') {
+        const [f, w] = String(args[++i] ?? '').split('=');
+        if (f && (w === 'mine' || w === 'upstream')) out.choices[f] = w;
+        continue;
+      }
       out.positional.push(a);
     }
     return out;
@@ -736,16 +852,19 @@
 
   function stack({ subcommand: sub, args = [] }) {
     if (!fx.node.ok) return errOut('node 22+ is required (fixture: no-node scenario)');
-    const { json, dryRun, kind, to, file, positional } = splitArgs(args);
-    // Same gate as the Rust argv builder: only import and preset apply take
-    // --dry-run (and only apply within preset; list/show reject it below).
-    if (dryRun && sub !== 'import' && sub !== 'preset') {
-      return errOut('--dry-run is only supported by import and preset apply');
+    const { json, dryRun, kind, to, file, noBackup, choices, positional } = splitArgs(args);
+    // Same gate as the Rust argv builder: import, update, restore, sync and
+    // preset apply take --dry-run (list/show reject it below).
+    if (dryRun && !['import', 'preset', 'update', 'restore', 'sync'].includes(sub)) {
+      return errOut('--dry-run is only supported by import, update, restore, sync and preset apply');
+    }
+    if ((Object.keys(choices).length || noBackup) && sub !== 'update') {
+      return errOut('--keep-mine/--take-upstream/--resolve/--no-backup are only for update');
     }
     // Bare catalog lists only: boot's `list worker` answers even while
     // the refresh fixture fails the catalog.
     if (sub === 'list' && !positional[0] && listsFail) {
-      return errOut('fixture: the stack moved mid-browse (mock +listfail)');
+      return errOut(listFailMsg);
     }
     const catalog = [...CATALOG, ...(fx.extraCatalog ?? [])];
     const visible = [...catalog.filter((e) => !(fx.noWorkers && e.id.startsWith('workers/'))), ...extra];
@@ -821,6 +940,8 @@
         if (dryRun) {
           const conflicts = [];
           for (const id of ids) {
+            const rf = Object.keys(fx.remoteFail ?? {}).find((pre) => id.startsWith(pre));
+            if (rf) return errOut(fx.remoteFail[rf]);
             const e = visible.find((x) => x.id === id);
             if (!e || e.committed === false) {
               return errOut(`${id} is not an entry at stack commit ${HEAD} (new entries must be committed to the stack before importing)`);
@@ -851,6 +972,14 @@
             ].join('\n'));
           }
           return jsonOut({ command: 'import', dryRun: true, commit: FULL, imported, already, conflicts, gitignore: 'unchanged' });
+        }
+        if (fx.importFail) return errOut(fx.importFail);
+        if (fx.interrupted && ids.length) {
+          const id = ids[0];
+          const dest = to || destFor(id);
+          // One file landed, one did not: the lock row exists and the status shows the gap.
+          fx.lock.push({ id, commit: FULL, path: dest, local: ['SKILL.md', 'notes.md'], upstream: [], missing: ['notes.md'] });
+          return errOut(`import was interrupted before it finished\nwrote:\n  ${dest}/SKILL.md\nnot written:\n  ${dest}/notes.md`);
         }
         for (const id of ids) {
           const e = visible.find((x) => x.id === id);
@@ -974,6 +1103,7 @@
       case 'update': {
         const rows = fx.lock.filter((r) => !positional.length || positional.includes(r.id));
         if (!rows.length && positional.length) return errOut(`${positional[0]} is not imported here`);
+        if (Object.keys(choices).length && positional.length !== 1) return errOut('per-file choices need exactly one entry id');
         const log = [];
         const updated = [];
         const conflicts = [];
@@ -981,6 +1111,7 @@
         const kept = [];
         const skipped = [];
         const gone = [];
+        const matched = new Set();
         for (const r of rows) {
           if (r.gone) {
             gone.push(r.id);
@@ -989,26 +1120,34 @@
           }
           if (!r.upstream?.length) continue;
           const both = r.upstream.filter((f) => r.local?.includes(f));
-          const clean = r.upstream.filter((f) => !r.local?.includes(f));
-          for (const f of both) {
+          const files = [];
+          const stillLocal = new Set(r.local ?? []);
+          for (const f of r.upstream) {
             const shown = `${r.path}/${f}`;
-            conflicts.push(shown);
-            log.push(`CONFLICT ${shown} (1 conflict; resolve the <<<<<<< markers)`);
+            if (!both.includes(f)) { files.push({ path: f, outcome: 'updated' }); merged.push(shown); stillLocal.delete(f); continue; }
+            const pick = choices[f];
+            if (pick) matched.add(f);
+            if (pick === 'mine') { files.push({ path: f, outcome: 'kept-mine' }); kept.push(shown); log.push(`kept    ${shown} (yours)`); }
+            else if (pick === 'upstream') {
+              files.push({ path: f, outcome: 'took-upstream' }); merged.push(shown); stillLocal.delete(f);
+              if (!noBackup) log.push(`saved   ${shown}.mine`);
+            } else { files.push({ path: f, outcome: 'conflict-markers' }); conflicts.push(shown); log.push(`CONFLICT ${shown} (1 conflict; resolve the <<<<<<< markers)`); }
           }
-          merged.push(...clean.map((f) => `${r.path}/${f}`));
-          if (both.length) r.local = [...new Set([...(r.local ?? []), ...r.upstream])];
-          else r.local = (r.local ?? []).filter((f) => !r.upstream.includes(f));
-          const changed = both.length + clean.length;
-          r.upstream = [];
-          r.commit = FULL;
-          updated.push({ id: r.id, changed });
-          log.push(`update  ${r.id} -> ${HEAD} (${changed} file${changed === 1 ? '' : 's'} changed upstream)`);
+          if (!dryRun) {
+            r.local = [...stillLocal];
+            r.upstream = [];
+            r.commit = FULL;
+          }
+          updated.push({ id: r.id, changed: files.length, files });
+          log.push(`update  ${r.id} -> ${HEAD} (${files.length} file${files.length === 1 ? '' : 's'} changed upstream)`);
         }
+        const unmatched = Object.keys(choices).filter((f) => !matched.has(f));
         if (!log.length) log.push(`up to date with ${HEAD}`);
         if (!json) return okOut(log.join('\n'));
         return jsonOut({
-          command: 'update', commit: FULL, updated, conflicts, merged,
+          command: 'update', ...(dryRun ? { dryRun: true } : {}), commit: FULL, updated, conflicts, merged,
           kept, skipped, gone, imported: [],
+          ...(unmatched.length ? { unmatched } : {}),
           upToDate: !updated.length,
         });
       }
@@ -1032,26 +1171,34 @@
         if (!json) return okOut(log.join('\n'));
         return jsonOut({ command: 'remove', removed: id, kept, requiredBy: users, gitignore: 'unchanged' });
       }
-      case 'sync': {
+      case 'sync':
+      case 'restore': {
+        const command = sub === 'restore' ? 'restore' : 'sync';
+        const rows = fx.lock.filter((r) => !positional.length || positional.includes(r.id));
+        const unknown = positional.find((id) => !fx.lock.some((r) => r.id === id));
+        if (unknown) return errOut(`${unknown} is not imported here`);
         const log = [];
         const restored = [];
         const kept = [];
         const skipped = [];
-        for (const r of fx.lock) {
+        for (const r of rows) {
           for (const f of r.missing ?? []) {
             const shown = `${r.path}/${f}`;
             restored.push(shown);
             log.push(`restored ${shown}`);
           }
-          r.local = (r.local ?? []).filter((f) => !(r.missing ?? []).includes(f));
-          r.missing = [];
-          for (const f of r.local ?? []) kept.push(`${r.path}/${f}`);
+          const miss = r.missing ?? [];
+          if (!dryRun) {
+            r.local = (r.local ?? []).filter((f) => !miss.includes(f));
+            r.missing = [];
+          }
+          for (const f of (r.local ?? []).filter((f) => !miss.includes(f))) kept.push(`${r.path}/${f}`);
         }
         log.push(restored.length || kept.length
-          ? `sync done: ${restored.length} file${restored.length === 1 ? '' : 's'} restored, ${kept.length} kept (edited here)`
-          : 'sync done: everything already in place');
+          ? `${command} done: ${restored.length} file${restored.length === 1 ? '' : 's'} restored, ${kept.length} kept (edited here)`
+          : `${command} done: everything already in place`);
         if (!json) return okOut(log.join('\n'));
-        return jsonOut({ command: 'sync', restored, kept, skipped });
+        return jsonOut({ command, ...(dryRun ? { dryRun: true } : {}), restored, kept, skipped, pruned: [], worker: null });
       }
       case 'gitignore': {
         return okOut('gitignore: managed block up to date (fixture)');
@@ -1136,14 +1283,26 @@
     get_config: async () => structuredClone(fx.config),
     save_config: async ({ config }) => {
       fx.config = structuredClone(config);
+      persistConfig();
       return null;
     },
     add_recent_project: async ({ path }) => {
       fx.config.recentProjects = [path, ...fx.config.recentProjects.filter((p) => p !== path)].slice(0, 10);
+      persistConfig();
       return structuredClone(fx.config);
     },
     validate_project: async ({ path }) => fx.report(path),
     project_folders: async () => ({ folders: [...(fx.folders ?? [])] }),
+    // Review-changes: the installed copy of one project file. Fixtures name the
+    // edited / stale copies by project-relative path (fx.installed); any other
+    // file of an imported entry reads as its upstream body, a path nothing
+    // imported there as missing. The real command refuses escapes the same way.
+    read_project_file: async ({ path }) => {
+      if (!path || path.startsWith('/') || path.split('/').includes('..')) throw 'path escapes the project directory';
+      const text = fx.installed?.[path];
+      if (text === undefined) return { exists: false, size: 0, binary: false, truncated: false, text: null };
+      return { exists: true, size: text.length, binary: false, truncated: false, text };
+    },
     node_status: async () => ({ ...fx.node }),
     // Release version the footer shows (mirrors tauri.conf in the real app).
     'plugin:app|version': async () => '0.1.0',
@@ -1189,6 +1348,108 @@
       }
       return structuredClone(fx.cli);
     },
+    t3_status: async () => ({
+      available: t3Mode,
+      version: t3Mode ? '0.1.7' : null,
+      error: t3Mode ? null : 't3 was not found on PATH',
+    }),
+    t3_workspace: async ({ projectDir }) => {
+      const mainRoot = '/home/dev/projects/folio';
+      const cur = projectDir || mainRoot;
+      if (!t3Mode) {
+        return {
+          t3Available: false,
+          t3Version: null,
+          t3Error: 't3 was not found on PATH',
+          registered: false,
+          mainRoot: cur,
+          worktrees: [
+            { path: cur, branch: 'main', detached: false, isMain: true, isT3: false, hasLock: !!fx.lock.length, isCurrent: true },
+          ],
+          threads: [],
+        };
+      }
+      fx.t3Worktrees ??= [
+        { path: mainRoot, branch: 'main', detached: false, isMain: true, isT3: false, hasLock: !!fx.lock.length },
+        { path: '/home/dev/.t3/worktrees/folio/feat-ui', branch: 't3/feat-ui', detached: false, isMain: false, isT3: true, hasLock: true },
+        { path: '/home/dev/.t3/worktrees/folio/spike', branch: 't3/spike', detached: false, isMain: false, isT3: true, hasLock: false },
+      ];
+      fx.t3Threads ??= [
+        {
+          threadId: 't3-fixture-1',
+          title: 'Build Browse UI',
+          status: 'idle',
+          provider: 'claude-code',
+          model: 'sonnet-4',
+          branch: 't3/feat-ui',
+          worktreePath: '/home/dev/.t3/worktrees/folio/feat-ui',
+          link: 't3://thread/t3-fixture-1',
+          updatedAt: '2026-11-18T00:10:00Z',
+        },
+        {
+          threadId: 't3-fixture-2',
+          title: 'Main Repo Review',
+          status: 'running',
+          provider: 'codex',
+          model: 'gpt-5',
+          branch: 'main',
+          worktreePath: null,
+          link: 't3://thread/t3-fixture-2',
+          updatedAt: '2026-11-18T00:05:00Z',
+        },
+      ];
+      return {
+        t3Available: true,
+        t3Version: '0.1.7',
+        t3Error: null,
+        registered: true,
+        mainRoot,
+        worktrees: fx.t3Worktrees.map((w) => ({ ...w, isCurrent: w.path === cur })),
+        threads: structuredClone(fx.t3Threads),
+      };
+    },
+    t3_send_thread: async ({ threadId }) => {
+      const existing = fx.t3Threads?.find((t) => t.threadId === threadId);
+      if (existing) existing.status = 'running';
+      return {
+        threadId,
+        title: existing?.title ?? threadId,
+        link: existing?.link ?? `t3://thread/${threadId}`,
+        status: 'running',
+      };
+    },
+    t3_start_thread: async ({ title, worktree, branch }) => {
+      const id = `t3-fixture-${(fx.t3Threads?.length ?? 2) + 1}`;
+      const label = title || 'Fixture thread';
+      const created = {
+        threadId: id,
+        title: label,
+        status: 'running',
+        provider: 'claude-code',
+        model: 'sonnet-4',
+        branch: branch || (worktree ? `t3/${id}` : 'main'),
+        worktreePath: worktree ? `/home/dev/.t3/worktrees/folio/${id}` : null,
+        link: `t3://thread/${id}`,
+        updatedAt: new Date().toISOString(),
+      };
+      if (fx.t3Threads) fx.t3Threads.unshift(created);
+      if (worktree && fx.t3Worktrees) {
+        fx.t3Worktrees.push({
+          path: created.worktreePath,
+          branch: created.branch,
+          detached: false,
+          isMain: false,
+          isT3: true,
+          hasLock: false,
+        });
+      }
+      return {
+        threadId: id,
+        title: label,
+        link: created.link,
+        status: 'running',
+      };
+    },
   };
 
   // Deterministic reloads per scenario.
@@ -1200,6 +1461,9 @@
 
   window.__TAURI_INTERNALS__ = {
     invoke: async (cmd, args = {}) => {
+      // Probes read every stack call the app made (and every project file it read) from here.
+      if (cmd === 'stack_run') (window.__stackCalls ??= []).push({ sub: args.subcommand, args: [...(args.args ?? [])] });
+      if (cmd === 'read_project_file') (window.__fileReads ??= []).push(args.path);
       const fn = handlers[cmd];
       if (!fn) {
         console.warn(`[mock-app-bridge] unknown command: ${cmd}`);

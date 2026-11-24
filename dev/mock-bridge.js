@@ -149,6 +149,20 @@
     provision_stack: async () => ({ status: "kept", path: "/home/dev/escacs/stack", message: "already at ~/escacs/stack" }),
     stack_cli_status: async () => ({ status: "linked-ok", link: "~/.local/bin/stack", expected: "~/escacs/stack/bin/stack", actual: "~/escacs/stack/bin/stack", onPath: true, message: "the stack command is linked." }),
     link_stack_cli: async () => ({ status: "linked-ok", link: "~/.local/bin/stack", expected: "~/escacs/stack/bin/stack", actual: "~/escacs/stack/bin/stack", onPath: true, message: "the stack command is linked." }),
+    t3_status: async () => ({ available: false, version: null, error: null }),
+    t3_workspace: async ({ projectDir }) => ({
+      t3Available: false,
+      t3Version: null,
+      t3Error: null,
+      registered: false,
+      mainRoot: projectDir || "/home/dev/projects/folio",
+      worktrees: projectDir
+        ? [{ path: projectDir, branch: "main", detached: false, isMain: true, isT3: false, hasLock: !!fx.lock.length, isCurrent: true }]
+        : [],
+      threads: [],
+    }),
+    t3_send_thread: async ({ threadId }) => ({ threadId, title: "Fixture thread", link: `t3://thread/${threadId}`, status: "running" }),
+    t3_start_thread: async ({ title }) => ({ threadId: "t3-mock-new", title: title ?? "Fixture thread", link: "t3://thread/t3-mock-new", status: "running" }),
   };
 
   // Deterministic reloads per scenario.

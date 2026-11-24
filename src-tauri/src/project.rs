@@ -150,6 +150,57 @@ pub fn project_folders(path: String) -> Result<ProjectFolders, String> {
     })
 }
 
+/// Largest file the review-changes diff will read; bigger ones report only a size.
+const READ_CAP: u64 = 256 * 1024;
+
+/// One project file for the review-changes diff: `exists` false when absent,
+/// `text` null for binary or oversized files (`size` still reports).
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFile {
+    pub exists: bool,
+    pub size: u64,
+    pub binary: bool,
+    pub truncated: bool,
+    pub text: Option<String>,
+}
+
+/// Read one file inside the project (never outside, symlinks included).
+/// Read-only; a missing file is `exists: false`, not an error.
+pub fn read_inside(root: &Path, rel: &str) -> Result<ProjectFile, String> {
+    let full = crate::paths::join_inside(root, rel)?;
+    let meta = match std::fs::symlink_metadata(&full) {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(ProjectFile { exists: false, size: 0, binary: false, truncated: false, text: None });
+        }
+    };
+    // A symlink (or anything not a plain file) is reported, never followed.
+    if !meta.is_file() {
+        return Ok(ProjectFile { exists: true, size: 0, binary: true, truncated: false, text: None });
+    }
+    let size = meta.len();
+    if size > READ_CAP {
+        return Ok(ProjectFile { exists: true, size, binary: false, truncated: true, text: None });
+    }
+    let bytes = std::fs::read(&full).map_err(|e| format!("read file: {e}"))?;
+    if bytes.iter().take(4096).any(|b| *b == 0) {
+        return Ok(ProjectFile { exists: true, size, binary: true, truncated: false, text: None });
+    }
+    Ok(ProjectFile {
+        exists: true,
+        size,
+        binary: false,
+        truncated: false,
+        text: Some(String::from_utf8_lossy(&bytes).into_owned()),
+    })
+}
+
+#[tauri::command(async)]
+pub fn read_project_file(project_dir: String, path: String) -> Result<ProjectFile, String> {
+    read_inside(Path::new(&project_dir), &path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +275,59 @@ mod tests {
         let p = proj("empty");
         assert!(list_project_folders(&p).is_empty());
         let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn read_inside_reads_text_and_reports_missing() {
+        let p = proj("read");
+        std::fs::create_dir_all(p.join("a")).unwrap();
+        std::fs::write(p.join("a/SKILL.md"), "hello\nworld\n").unwrap();
+        let f = read_inside(&p, "a/SKILL.md").unwrap();
+        assert!(f.exists && !f.binary && !f.truncated);
+        assert_eq!(f.text.as_deref(), Some("hello\nworld\n"));
+        assert_eq!(f.size, 12);
+        let gone = read_inside(&p, "a/nope.md").unwrap();
+        assert!(!gone.exists && gone.text.is_none());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn read_inside_flags_binary_and_oversized() {
+        let p = proj("readbin");
+        std::fs::write(p.join("x.bin"), [0u8, 1, 2, 3]).unwrap();
+        let b = read_inside(&p, "x.bin").unwrap();
+        assert!(b.exists && b.binary && b.text.is_none());
+        std::fs::write(p.join("big.txt"), vec![b'a'; (READ_CAP + 1) as usize]).unwrap();
+        let big = read_inside(&p, "big.txt").unwrap();
+        assert!(big.exists && big.truncated && big.text.is_none() && big.size == READ_CAP + 1);
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn read_inside_refuses_escapes() {
+        let p = proj("readesc");
+        assert!(read_inside(&p, "../secret").is_err());
+        assert!(read_inside(&p, "/etc/passwd").is_err());
+        assert!(read_inside(&p, "").is_err());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_inside_never_follows_symlinks_out() {
+        let p = proj("readlink");
+        let out = proj("readlink-out");
+        std::fs::write(out.join("secret.txt"), "top secret").unwrap();
+        std::os::unix::fs::symlink(&out, p.join("evil")).unwrap();
+        assert!(read_inside(&p, "evil/secret.txt").is_err());
+        std::os::unix::fs::symlink(out.join("secret.txt"), p.join("link.txt")).unwrap();
+        // A link leaving the project is refused outright; one staying inside is reported, not read.
+        assert!(read_inside(&p, "link.txt").is_err());
+        std::fs::write(p.join("real.txt"), "inside").unwrap();
+        std::os::unix::fs::symlink(p.join("real.txt"), p.join("ok-link.txt")).unwrap();
+        let f = read_inside(&p, "ok-link.txt").unwrap();
+        assert!(f.exists && f.text.is_none());
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&out);
     }
 }

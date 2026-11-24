@@ -96,6 +96,19 @@ export const validateProject = (path: string): Promise<ProjectReport> =>
 export const projectFolders = (path: string): Promise<ProjectFolders> =>
   invoke('project_folders', { path });
 
+/** One project file for the review-changes diff (read-only, confined to the project). */
+export type ProjectFile = {
+  exists: boolean;
+  size: number;
+  binary: boolean;
+  /** Over the read cap: size only, no text. */
+  truncated: boolean;
+  text: string | null;
+};
+
+export const readProjectFile = (projectDir: string, path: string): Promise<ProjectFile> =>
+  invoke('read_project_file', { projectDir, path });
+
 export const nodeStatus = (): Promise<NodeStatus> => invoke('node_status');
 
 export function stackRun(
@@ -130,16 +143,6 @@ export function scanProjects(opts: {
   });
 }
 
-/** Default scan roots without scanning (for the settings UI). */
-export function defaultScanRoots(stackDir?: string | null): Promise<ScanRoots> {
-  return invoke('default_scan_roots', { ...(stackDir ? { stackDir } : {}) });
-}
-
-/** Where the stack checkout resolves from (never throws). */
-export function stackLocation(stackDir?: string | null): Promise<StackLocation> {
-  return invoke('stack_location', { ...(stackDir ? { stackDir } : {}) });
-}
-
 /**
  * First-run validation: the dir must be a git checkout with HEAD, contain
  * tools/stack/cli.mjs, and node 22+ must be present.
@@ -166,6 +169,73 @@ export function stackCliStatus(stackDir?: string | null): Promise<CliStatus> {
  */
 export function linkStackCli(stackDir?: string | null): Promise<CliStatus> {
   return invoke('link_stack_cli', { ...(stackDir ? { stackDir } : {}) });
+}
+
+export type T3Status = {
+  available: boolean;
+  version: string | null;
+  error: string | null;
+};
+
+export type WorktreeInfo = {
+  path: string;
+  branch: string | null;
+  detached: boolean;
+  isMain: boolean;
+  isT3: boolean;
+  hasLock: boolean;
+  isCurrent: boolean;
+};
+
+export type T3ThreadInfo = {
+  threadId: string;
+  title: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  branch: string | null;
+  worktreePath: string | null;
+  link: string | null;
+  updatedAt: string | null;
+};
+
+export type T3WorkspaceReport = {
+  t3Available: boolean;
+  t3Version: string | null;
+  t3Error: string | null;
+  registered: boolean;
+  mainRoot: string;
+  worktrees: WorktreeInfo[];
+  threads: T3ThreadInfo[];
+};
+
+export type T3ThreadActionResult = {
+  threadId: string;
+  title: string | null;
+  link: string | null;
+  status: string | null;
+};
+
+export const t3Workspace = (projectDir: string): Promise<T3WorkspaceReport> =>
+  invoke('t3_workspace', { projectDir });
+
+export const t3SendThread = (threadId: string, message: string): Promise<T3ThreadActionResult> =>
+  invoke('t3_send_thread', { threadId, message });
+
+export function t3StartThread(opts: {
+  projectDir: string;
+  message: string;
+  title?: string | null;
+  worktree?: string | null;
+  branch?: string | null;
+}): Promise<T3ThreadActionResult> {
+  return invoke('t3_start_thread', {
+    projectDir: opts.projectDir,
+    message: opts.message,
+    ...(opts.title ? { title: opts.title } : {}),
+    ...(opts.worktree ? { worktree: opts.worktree } : {}),
+    ...(opts.branch ? { branch: opts.branch } : {}),
+  });
 }
 
 // Bridge errors arrive as rejected strings (real shell) or nulls (mock
