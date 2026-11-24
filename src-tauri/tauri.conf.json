@@ -35,8 +35,17 @@
       "appimage"
     ],
     "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
       "icons/icon.png"
     ],
+    "category": "DeveloperTool",
+    "shortDescription": "Browse the stack catalog and keep imported skills, styles and components up to date",
+    "longDescription": "Stack is a desktop client for the escacs stack: browse the catalog of agent assets, import entries with an Import plan, keep imports healthy in your project (updates, edits, missing files) and send entries to T3 Code threads.",
+    "publisher": "escacs",
     "createUpdaterArtifacts": true
   },
   "plugins": {
